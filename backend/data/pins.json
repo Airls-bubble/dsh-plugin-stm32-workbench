@@ -1,0 +1,884 @@
+{
+  "mcu": "STM32F103C8T6",
+  "package": "LQFP48",
+  "flashKB": 64,
+  "ramKB": 20,
+  "coreClockMHz": 72,
+  "sources": [
+    {
+      "id": "DS5319",
+      "what": "ST 官方数据手册 DS5319 Rev 19, STM32F103x8 / STM32F103xB (medium-density)，Table 5 \"Medium-density STM32F103xx pin definitions\"，第 28-33 页（114 页版），含注释 1-9。本表提供了 LQFP48 脚号、引脚名、类型 (I/O/S)、I/O structure 列 (FT = 5 V tolerant)，以及 PC13-15 / PD0-PD1 的限制。",
+      "url": "https://www.st.com/resource/en/datasheet/stm32f103c8.pdf",
+      "mirrorUsed": "https://www.rlocman.ru/datasheet/pdf.html?di=184185 (PDF 文本版，逐页核对 p.28-33)"
+    },
+    {
+      "id": "STM32_open_pin_data",
+      "what": "ST 官方开源引脚数据库 (CubeMX DB) 中 STM32F103C(8-B)Tx.xml：LQFP48 的 48 个 Position、引脚名、Type、以及每个引脚的 Signal 列表（GPIO/ADC/TIM/USART/SPI/I2C/CAN/USB/DEBUG）。",
+      "url": "https://github.com/STMicroelectronics/STM32_open_pin_data/blob/master/mcu/STM32F103C(8-B)Tx.xml"
+    },
+    {
+      "id": "STM32duino",
+      "what": "STM32duino Arduino_Core_STM32 变体 variants/STM32F1xx/F103C8T_F103CB(T-U)/PeripheralPins.c（由 ST CubeMX DB 6.0.180 生成）与 variant_generic.cpp：用于交叉核对 ADC/I2C/SPI/USART/TIM/CAN/USB 的默认引脚与重映射引脚。",
+      "url": "https://github.com/stm32duino/Arduino_Core_STM32/blob/main/variants/STM32F1xx/F103C8T_F103CB(T-U)/PeripheralPins.c"
+    },
+    {
+      "id": "stm32-base",
+      "what": "STM32-base 项目 Blue Pill (STM32F103C8T6) 板级页面：交叉核对 SWD 头 = PA13(SWDIO)/PA14(SWCLK)、USB D- = PA11 / D+ = PA12、BOOT1 跳线 = PB2、PC13 为用户 LED。",
+      "url": "https://stm32-base.org/boards/STM32F103C8T6-Blue-Pill.html"
+    },
+    {
+      "id": "ST-community-legend",
+      "what": "ST 官方中文社区帖子（引用数据手册图例）：FT = 5 V tolerant I/O；TTa = 3.3 V tolerant I/O directly connected to ADC；TC = Standard 3.3 V I/O。用于确认 \"FT\" 的含义。",
+      "url": "https://shequ.stmicroelectronics.cn/forum.php?mod=viewthread&tid=606503"
+    },
+    {
+      "id": "ST-community-PB5",
+      "what": "ST 官方社区帖子标题 \"Is PB5 really not 5V tolerant?\"（存在该讨论本身即说明数据手册中 PB5 未被标为 FT）。该帖正文为 JS 渲染，未能抓取到答复全文，故 PB5 在 pins.json 中标记 verified:false。",
+      "url": "https://community.st.com/t5/stm32-mcus-products/is-pb5-really-not-5v-tolerant/td-p/561044"
+    },
+    {
+      "id": "RM0008",
+      "what": "ST 参考手册 RM0008 (STM32F10xxx)：AFIO 重映射表、EXTI 线到端口的映射、SWJ_CFG(JTAG/SWD 复用) 说明。注意：本文件所有逐脚结论都来自上面两个可获得文本的来源；RM0008 原文是 PDF，未能抓取核对，涉及重映射的表述以 CubeMX 官方引脚库为准。",
+      "url": "https://www.st.com/resource/en/reference_manual/rm0008-stm32f101xx-stm32f102xx-stm32f103xx-stm32f105xx-and-stm32f107xx-advanced-armbased-32bit-mcus-stmicroelectronics.pdf"
+    }
+  ],
+  "notes": [
+    "LQFP48 脚号方向（仅影响界面绘制，不影响本文件的 1..48 升序）：1-12 左侧自上而下，13-24 底边自左向右，25-36 右侧自下而上，37-48 顶边自右向左（标准 QFP 逆时针编号，37 紧邻 36，48 紧邻 1）。",
+    "5V 容忍判定依据：DS5319 Rev 19 Table 5 的 \"I/O structure\" 列，注释 2 明确 \"FT = 5 V tolerant\"。该列标 FT 的引脚 = 5V 容忍；该列为空/`-` 的引脚数据手册并未标 FT，本文件一律按 fiveVTolerant:false 处理。",
+    "重要更正（与常见说法相反）：本数据手册中 PA13 / PA14 / PA15 / PB3 / PB4 的 I/O structure 列均标 FT（5V 容忍），它们不是 5V 容忍的例外。真正的非 5V 容忍 IO 是：PA0-PA7、PB0、PB1（ADC 输入脚）、PB5（见下）、PC13/PC14/PC15（功率开关供电）、PD0/PD1（晶振脚）。",
+    "PA0-PA7、PB0、PB1 为 ADC 输入脚，Table 5 未标 FT（ST 图例中这类引脚为 TTa = 3.3 V tolerant I/O directly connected to ADC）→ 不要在这 10 个脚上直接接 5V 数字信号。",
+    "PB5 是数据手册中的一个异常点：PB5 行没有 FT 标记，而相邻的 PB4/PB6 都有。ST 社区有 \"Is PB5 really not 5V tolerant?\" 讨论帖。本文件按非 5V 容忍处理并标 verified:false，使用前请以实物/最新版手册复核。",
+    "PC13/PC14/PC15：DS5319 Table 5 注释 5 —— 这三个 IO 经功率开关供电，开关只能吸收约 3 mA，因此输出模式受限制：速度不得超过 2 MHz、最大负载 30 pF，且不得作电流源（例如不能直接驱动 LED）。注释 6 补充其状态受备份域影响。",
+    "PD0/PD1：DS5319 Table 5 注释 7 —— LQFP48 的第 5、6 脚复位后配置为 OSC_IN/OSC_OUT；PD0/PD1 功能可由软件重映射到这两个脚（即用不了外部 HSE 晶振，二选一）；作输出时最高 50 MHz。",
+    "PB2 = BOOT1：复位时与 BOOT0 一起被采样决定启动模式；在 LQFP48 上是第 20 脚，且数据手册标 FT（5V 容忍）。作普通 IO 使用时注意外部电路不要在其上拉高。BOOT0 是专用输入脚（第 44 脚），并非 GPIO。",
+    "PA13/PA14 = SWDIO/SWCLK：复位后 SWJ 默认全使能（JTAG+SWD 占用 PA13/PA14/PA15/PB3/PB4）。把它们当普通 IO 用需要改写 AFIO_MAPR 的 SWJ_CFG（通常会永久失去调试口），界面应据此给出冲突/警告。",
+    "PA15/PB3/PB4（JTDI/JTDO/NJTRST）只有在关闭 JTAG（保留 SWD）后才可作为 GPIO、SPI1 重映射脚或 TIM2/TIM3 通道使用。",
+    "I2C2 与 USART3 在 LQFP48 上共用引脚：PB10 = I2C2_SCL = USART3_TX，PB11 = I2C2_SDA = USART3_RX（DS5319 Table 5 注释 4：共用同一引脚的外设同一时刻只能使能一个）。",
+    "ADC：F103C8 有 ADC1 与 ADC2，但两者的外部通道 0-9 共用同一组引脚（PA0-PA7、PB0、PB1），不能同时采同一引脚的两个转换器。本封装无独立 VREF+/VREF- 引脚（内部连到 VDDA/VSSA）。",
+    "中等容量 F103C8 没有 DAC：PA4/PA5 不是 DAC_OUT1/DAC_OUT2（ST 官方 CubeMX 引脚库中本型号无 DAC 信号）。",
+    "EXTI0-EXTI15：每个 EXTI 线的端口由 AFIO_EXTICR 选择，同一号线在多端口之间只能选一个（例如 EXTI0 只能接 PA0 或 PB0）。本文件为每个 GPIO 列出其同名 EXTI 线。",
+    "functions[].kind 只使用前端约定的枚举：gpio|uart|i2c|spi|adc|tim|exti|usb|can|debug|pwr|boot。枚举中没有\"时钟/复位/RTC\"类，因此晶振(OSC_IN/OSC_OUT/OSC32)、MCO、NRST、RTC_TAMPER/RTC_OUT、WKUP、电源脚统一归入 kind:\"pwr\"，并在对应 note 中说明；这不是说它们属于电源外设。",
+    "fiveVTolerant 只描述引脚的 5V 输入耐受能力，不代表该脚可以输出 5V（IO 输出高电平仍为 VDD≈3.3V）。"
+  ],
+  "pins": [
+    {
+      "pin": 1,
+      "name": "VBAT",
+      "port": null,
+      "type": "power",
+      "io": false,
+      "fiveVTolerant": false,
+      "note": "备份域供电（RTC / 备份寄存器 / PC13-PC15 功率开关）。不用备份域时通常接到 VDD。非 IO。",
+      "functions": [
+        { "peripheral": "PWR", "signal": "VBAT", "kind": "pwr" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.28 (VBAT, Type S); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 1"
+    },
+    {
+      "pin": 2,
+      "name": "PC13-TAMPER-RTC",
+      "port": "PC13",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": false,
+      "note": "经功率开关供电：输出限 2 MHz / 负载<=30 pF / 最大 3 mA，不得作电流源（不能直接驱动 LED）。Table 5 未标 FT → 非 5V 容忍。RTC_TAMPER / RTC_OUT 属备份域，状态受 BKP 寄存器影响。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PC13", "kind": "gpio" },
+        { "peripheral": "EXTI", "signal": "EXTI13", "kind": "exti" },
+        { "peripheral": "RTC", "signal": "RTC_TAMPER", "kind": "pwr", "note": "备份域功能，kind 归入 pwr（枚举无 rtc）" },
+        { "peripheral": "RTC", "signal": "RTC_OUT", "kind": "pwr", "note": "备份域功能，kind 归入 pwr（枚举无 rtc）" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.28 + note 5/6; STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 2"
+    },
+    {
+      "pin": 3,
+      "name": "PC14-OSC32_IN",
+      "port": "PC14",
+      "type": "clock",
+      "io": true,
+      "fiveVTolerant": false,
+      "note": "OSC32_IN = LSE 32.768 kHz 晶振输入，复位后默认功能。不用 LSE 时才可作 GPIO PC14，且同样受 3 mA / 2 MHz 限制。未标 FT → 非 5V 容忍。",
+      "functions": [
+        { "peripheral": "RCC", "signal": "OSC32_IN", "kind": "pwr", "note": "时钟/晶振功能，kind 归入 pwr（枚举无 clock）" },
+        { "peripheral": "GPIO", "signal": "PC14", "kind": "gpio" },
+        { "peripheral": "EXTI", "signal": "EXTI14", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.28 + note 5/6; STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 3"
+    },
+    {
+      "pin": 4,
+      "name": "PC15-OSC32_OUT",
+      "port": "PC15",
+      "type": "clock",
+      "io": true,
+      "fiveVTolerant": false,
+      "note": "OSC32_OUT = LSE 32.768 kHz 晶振输出，复位后默认功能。不用 LSE 时才可作 GPIO PC15，同样受 3 mA / 2 MHz 限制。未标 FT → 非 5V 容忍。",
+      "functions": [
+        { "peripheral": "RCC", "signal": "OSC32_OUT", "kind": "pwr", "note": "时钟/晶振功能，kind 归入 pwr（枚举无 clock）" },
+        { "peripheral": "GPIO", "signal": "PC15", "kind": "gpio" },
+        { "peripheral": "EXTI", "signal": "EXTI15", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.28 + note 5/6; STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 4"
+    },
+    {
+      "pin": 5,
+      "name": "PD0-OSC_IN",
+      "port": "PD0",
+      "type": "clock",
+      "io": true,
+      "fiveVTolerant": false,
+      "note": "LQFP48 第 5 脚复位后是 OSC_IN（HSE 外部晶振输入，Typ.4-16 MHz）；按 DS5319 note 7，可由软件重映射为 PD0 当普通 GPIO。也就是说 LQFP48 上\"外部 HSE 晶振\"与\"PD0\"二选一。晶振脚未标 FT → 非 5V 容忍。",
+      "functions": [
+        { "peripheral": "RCC", "signal": "OSC_IN", "kind": "pwr", "note": "HSE 时钟输入，kind 归入 pwr（枚举无 clock）" },
+        { "peripheral": "GPIO", "signal": "PD0", "kind": "gpio", "note": "需软件重映射（DS5319 note 7）" },
+        { "peripheral": "EXTI", "signal": "EXTI0", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.28 + note 7; STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 5"
+    },
+    {
+      "pin": 6,
+      "name": "PD1-OSC_OUT",
+      "port": "PD1",
+      "type": "clock",
+      "io": true,
+      "fiveVTolerant": false,
+      "note": "LQFP48 第 6 脚复位后是 OSC_OUT（HSE 晶振输出）；可由软件重映射为 PD1 作 GPIO，作输出时最高 50 MHz（DS5319 note 7）。晶振脚未标 FT → 非 5V 容忍。",
+      "functions": [
+        { "peripheral": "RCC", "signal": "OSC_OUT", "kind": "pwr", "note": "HSE 时钟输出，kind 归入 pwr（枚举无 clock）" },
+        { "peripheral": "GPIO", "signal": "PD1", "kind": "gpio", "note": "需软件重映射（DS5319 note 7）" },
+        { "peripheral": "EXTI", "signal": "EXTI1", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.28 + note 7; STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 6"
+    },
+    {
+      "pin": 7,
+      "name": "NRST",
+      "port": null,
+      "type": "reset",
+      "io": false,
+      "fiveVTolerant": false,
+      "note": "系统复位，低有效，内部弱上拉（DS5319 Table 5 注释 1 中类型为 I/O，但功能是复位，不能当 GPIO）。未标 FT，属 3.3V 域信号，不要直接喂 5V。",
+      "functions": [
+        { "peripheral": "SYS", "signal": "NRST", "kind": "pwr", "note": "复位脚，kind 归入 pwr（枚举无 reset）" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.28 (NRST); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 7 (Type Reset)"
+    },
+    {
+      "pin": 8,
+      "name": "VSSA",
+      "port": null,
+      "type": "power",
+      "io": false,
+      "fiveVTolerant": false,
+      "note": "模拟地（ADC 参考地）。应就近与 VSS 单点/低阻连接。非 IO。",
+      "functions": [
+        { "peripheral": "PWR", "signal": "VSSA", "kind": "pwr" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.28 (VSSA, Type S); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 8"
+    },
+    {
+      "pin": 9,
+      "name": "VDDA",
+      "port": null,
+      "type": "power",
+      "io": false,
+      "fiveVTolerant": false,
+      "note": "模拟电源（ADC 参考电压）。工作范围 2.0-3.6V，需加去耦/滤波；本封装无独立 VREF+/VREF- 引脚。非 IO。",
+      "functions": [
+        { "peripheral": "PWR", "signal": "VDDA", "kind": "pwr" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.28 (VDDA, Type S); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 9"
+    },
+    {
+      "pin": 10,
+      "name": "PA0-WKUP",
+      "port": "PA0",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": false,
+      "note": "ADC 输入脚（DS5319 Table 5 未标 FT，属 3.3V/模拟类）→ 不要直接接 5V 数字信号。可作唤醒源 WKUP。TIM2_CH1 与 TIM2_ETR 共用同一脚，二选一。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PA0", "kind": "gpio" },
+        { "peripheral": "ADC1", "signal": "ADC1_IN0", "kind": "adc" },
+        { "peripheral": "ADC2", "signal": "ADC2_IN0", "kind": "adc" },
+        { "peripheral": "TIM2", "signal": "TIM2_CH1", "kind": "tim" },
+        { "peripheral": "TIM2", "signal": "TIM2_ETR", "kind": "tim" },
+        { "peripheral": "USART2", "signal": "USART2_CTS", "kind": "uart" },
+        { "peripheral": "SYS", "signal": "WKUP", "kind": "pwr", "note": "唤醒引脚，kind 归入 pwr" },
+        { "peripheral": "EXTI", "signal": "EXTI0", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.29 (PA0-WKUP, no FT) + p.28 note 2; STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 10; STM32duino F103C8T PeripheralPins.c (ADC1_IN0)"
+    },
+    {
+      "pin": 11,
+      "name": "PA1",
+      "port": "PA1",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": false,
+      "note": "ADC 输入脚，未标 FT → 非 5V 容忍。USART2_RTS 与 TIM2_CH2 复用此脚。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PA1", "kind": "gpio" },
+        { "peripheral": "ADC1", "signal": "ADC1_IN1", "kind": "adc" },
+        { "peripheral": "ADC2", "signal": "ADC2_IN1", "kind": "adc" },
+        { "peripheral": "TIM2", "signal": "TIM2_CH2", "kind": "tim" },
+        { "peripheral": "USART2", "signal": "USART2_RTS", "kind": "uart" },
+        { "peripheral": "EXTI", "signal": "EXTI1", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.29 (PA1, no FT); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 11"
+    },
+    {
+      "pin": 12,
+      "name": "PA2",
+      "port": "PA2",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": false,
+      "note": "ADC 输入脚，未标 FT → 非 5V 容忍。USART2_TX 的默认引脚（也是常用调试串口）。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PA2", "kind": "gpio" },
+        { "peripheral": "ADC1", "signal": "ADC1_IN2", "kind": "adc" },
+        { "peripheral": "ADC2", "signal": "ADC2_IN2", "kind": "adc" },
+        { "peripheral": "TIM2", "signal": "TIM2_CH3", "kind": "tim" },
+        { "peripheral": "USART2", "signal": "USART2_TX", "kind": "uart" },
+        { "peripheral": "EXTI", "signal": "EXTI2", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.29 (PA2, no FT); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 12; STM32duino F103C8T PeripheralPins.c (USART2_TX)"
+    },
+    {
+      "pin": 13,
+      "name": "PA3",
+      "port": "PA3",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": false,
+      "note": "ADC 输入脚，未标 FT → 非 5V 容忍。USART2_RX 默认引脚。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PA3", "kind": "gpio" },
+        { "peripheral": "ADC1", "signal": "ADC1_IN3", "kind": "adc" },
+        { "peripheral": "ADC2", "signal": "ADC2_IN3", "kind": "adc" },
+        { "peripheral": "TIM2", "signal": "TIM2_CH4", "kind": "tim" },
+        { "peripheral": "USART2", "signal": "USART2_RX", "kind": "uart" },
+        { "peripheral": "EXTI", "signal": "EXTI3", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.29 (PA3, no FT); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 13"
+    },
+    {
+      "pin": 14,
+      "name": "PA4",
+      "port": "PA4",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": false,
+      "note": "ADC 输入脚，未标 FT → 非 5V 容忍。注意：中等容量 F103C8 无 DAC，PA4 不是 DAC_OUT1（ST 官方引脚库中本型号无 DAC 信号）。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PA4", "kind": "gpio" },
+        { "peripheral": "ADC1", "signal": "ADC1_IN4", "kind": "adc" },
+        { "peripheral": "ADC2", "signal": "ADC2_IN4", "kind": "adc" },
+        { "peripheral": "SPI1", "signal": "SPI1_NSS", "kind": "spi" },
+        { "peripheral": "USART2", "signal": "USART2_CK", "kind": "uart" },
+        { "peripheral": "EXTI", "signal": "EXTI4", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.29 (PA4, no FT); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 14"
+    },
+    {
+      "pin": 15,
+      "name": "PA5",
+      "port": "PA5",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": false,
+      "note": "ADC 输入脚，未标 FT → 非 5V 容忍。SPI1_SCK 默认引脚。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PA5", "kind": "gpio" },
+        { "peripheral": "ADC1", "signal": "ADC1_IN5", "kind": "adc" },
+        { "peripheral": "ADC2", "signal": "ADC2_IN5", "kind": "adc" },
+        { "peripheral": "SPI1", "signal": "SPI1_SCK", "kind": "spi" },
+        { "peripheral": "EXTI", "signal": "EXTI5", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.29 (PA5, no FT); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 15"
+    },
+    {
+      "pin": 16,
+      "name": "PA6",
+      "port": "PA6",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": false,
+      "note": "ADC 输入脚，未标 FT → 非 5V 容忍。SPI1_MISO / TIM3_CH1 / TIM1_BKIN 复用。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PA6", "kind": "gpio" },
+        { "peripheral": "ADC1", "signal": "ADC1_IN6", "kind": "adc" },
+        { "peripheral": "ADC2", "signal": "ADC2_IN6", "kind": "adc" },
+        { "peripheral": "SPI1", "signal": "SPI1_MISO", "kind": "spi" },
+        { "peripheral": "TIM3", "signal": "TIM3_CH1", "kind": "tim" },
+        { "peripheral": "TIM1", "signal": "TIM1_BKIN", "kind": "tim" },
+        { "peripheral": "EXTI", "signal": "EXTI6", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.29 (PA6, no FT); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 16"
+    },
+    {
+      "pin": 17,
+      "name": "PA7",
+      "port": "PA7",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": false,
+      "note": "ADC 输入脚，未标 FT → 非 5V 容忍。SPI1_MOSI / TIM3_CH2 / TIM1_CH1N 复用。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PA7", "kind": "gpio" },
+        { "peripheral": "ADC1", "signal": "ADC1_IN7", "kind": "adc" },
+        { "peripheral": "ADC2", "signal": "ADC2_IN7", "kind": "adc" },
+        { "peripheral": "SPI1", "signal": "SPI1_MOSI", "kind": "spi" },
+        { "peripheral": "TIM3", "signal": "TIM3_CH2", "kind": "tim" },
+        { "peripheral": "TIM1", "signal": "TIM1_CH1N", "kind": "tim" },
+        { "peripheral": "EXTI", "signal": "EXTI7", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.29 (PA7, no FT); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 17"
+    },
+    {
+      "pin": 18,
+      "name": "PB0",
+      "port": "PB0",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": false,
+      "note": "ADC 输入脚，未标 FT → 非 5V 容忍。TIM3_CH3 / TIM1_CH2N 复用。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PB0", "kind": "gpio" },
+        { "peripheral": "ADC1", "signal": "ADC1_IN8", "kind": "adc" },
+        { "peripheral": "ADC2", "signal": "ADC2_IN8", "kind": "adc" },
+        { "peripheral": "TIM3", "signal": "TIM3_CH3", "kind": "tim" },
+        { "peripheral": "TIM1", "signal": "TIM1_CH2N", "kind": "tim" },
+        { "peripheral": "EXTI", "signal": "EXTI0", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.29 (PB0, no FT); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 18"
+    },
+    {
+      "pin": 19,
+      "name": "PB1",
+      "port": "PB1",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": false,
+      "note": "ADC 输入脚，未标 FT → 非 5V 容忍。TIM3_CH4 / TIM1_CH3N 复用。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PB1", "kind": "gpio" },
+        { "peripheral": "ADC1", "signal": "ADC1_IN9", "kind": "adc" },
+        { "peripheral": "ADC2", "signal": "ADC2_IN9", "kind": "adc" },
+        { "peripheral": "TIM3", "signal": "TIM3_CH4", "kind": "tim" },
+        { "peripheral": "TIM1", "signal": "TIM1_CH3N", "kind": "tim" },
+        { "peripheral": "EXTI", "signal": "EXTI1", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.29 (PB1, no FT); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 19"
+    },
+    {
+      "pin": 20,
+      "name": "PB2-BOOT1",
+      "port": "PB2",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": true,
+      "note": "PB2 = BOOT1：复位时与 BOOT0 一起被采样决定启动模式（BOOT0=0 时 BOOT1 决定主 Flash / SRAM 启动），之后可作普通 IO。数据手册标 FT → 5V 容忍。用作 IO 时外部电路应避免把它拉高。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PB2", "kind": "gpio" },
+        { "peripheral": "BOOT", "signal": "BOOT1", "kind": "boot", "note": "只在复位采样时刻生效" },
+        { "peripheral": "EXTI", "signal": "EXTI2", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.30 (PB2 I/O FT, default PB2/BOOT1); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 20; stm32-base Blue Pill (BOOT1 jumper = PB2)"
+    },
+    {
+      "pin": 21,
+      "name": "PB10",
+      "port": "PB10",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": true,
+      "note": "冲突点：I2C2_SCL 与 USART3_TX 共用此脚（DS5319 Table 5 注释 4：同一引脚上的多个外设同一时刻只能使能一个）。TIM2_CH3 为部分重映射功能。标 FT → 5V 容忍。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PB10", "kind": "gpio" },
+        { "peripheral": "I2C2", "signal": "I2C2_SCL", "kind": "i2c", "note": "与 USART3_TX 冲突（同一引脚）" },
+        { "peripheral": "USART3", "signal": "USART3_TX", "kind": "uart", "note": "与 I2C2_SCL 冲突（同一引脚）" },
+        { "peripheral": "TIM2", "signal": "TIM2_CH3", "kind": "tim", "note": "部分重映射 AFIO_TIM2_PARTIAL_2" },
+        { "peripheral": "EXTI", "signal": "EXTI10", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.30 (PB10 I/O FT); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 21; STM32duino F103C8T PeripheralPins.c (I2C2_SCL / USART3_TX)"
+    },
+    {
+      "pin": 22,
+      "name": "PB11",
+      "port": "PB11",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": true,
+      "note": "冲突点：I2C2_SDA 与 USART3_RX 共用此脚。TIM2_CH4 为部分重映射功能。标 FT → 5V 容忍。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PB11", "kind": "gpio" },
+        { "peripheral": "I2C2", "signal": "I2C2_SDA", "kind": "i2c", "note": "与 USART3_RX 冲突（同一引脚）" },
+        { "peripheral": "USART3", "signal": "USART3_RX", "kind": "uart", "note": "与 I2C2_SDA 冲突（同一引脚）" },
+        { "peripheral": "TIM2", "signal": "TIM2_CH4", "kind": "tim", "note": "部分重映射 AFIO_TIM2_PARTIAL_2" },
+        { "peripheral": "EXTI", "signal": "EXTI11", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.30 (PB11 I/O FT); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 22; STM32duino F103C8T PeripheralPins.c"
+    },
+    {
+      "pin": 23,
+      "name": "VSS",
+      "port": null,
+      "type": "power",
+      "io": false,
+      "fiveVTolerant": false,
+      "note": "数字地（VSS_1）。非 IO。",
+      "functions": [
+        { "peripheral": "PWR", "signal": "VSS", "kind": "pwr" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.30 (VSS_1, Type S); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 23"
+    },
+    {
+      "pin": 24,
+      "name": "VDD",
+      "port": null,
+      "type": "power",
+      "io": false,
+      "fiveVTolerant": false,
+      "note": "数字电源（VDD_1），2.0-3.6V。非 IO。",
+      "functions": [
+        { "peripheral": "PWR", "signal": "VDD", "kind": "pwr" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.30 (VDD_1, Type S); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 24"
+    },
+    {
+      "pin": 25,
+      "name": "PB12",
+      "port": "PB12",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": true,
+      "note": "SPI2_NSS / I2C2_SMBA / USART3_CK / TIM1_BKIN 多重复用，同一时刻只能使能一个。标 FT → 5V 容忍。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PB12", "kind": "gpio" },
+        { "peripheral": "SPI2", "signal": "SPI2_NSS", "kind": "spi" },
+        { "peripheral": "I2C2", "signal": "I2C2_SMBA", "kind": "i2c" },
+        { "peripheral": "USART3", "signal": "USART3_CK", "kind": "uart" },
+        { "peripheral": "TIM1", "signal": "TIM1_BKIN", "kind": "tim" },
+        { "peripheral": "EXTI", "signal": "EXTI12", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.30 (PB12 I/O FT); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 25"
+    },
+    {
+      "pin": 26,
+      "name": "PB13",
+      "port": "PB13",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": true,
+      "note": "SPI2_SCK / USART3_CTS / TIM1_CH1N 复用。标 FT → 5V 容忍。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PB13", "kind": "gpio" },
+        { "peripheral": "SPI2", "signal": "SPI2_SCK", "kind": "spi" },
+        { "peripheral": "USART3", "signal": "USART3_CTS", "kind": "uart" },
+        { "peripheral": "TIM1", "signal": "TIM1_CH1N", "kind": "tim" },
+        { "peripheral": "EXTI", "signal": "EXTI13", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.30 (PB13 I/O FT); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 26"
+    },
+    {
+      "pin": 27,
+      "name": "PB14",
+      "port": "PB14",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": true,
+      "note": "SPI2_MISO / USART3_RTS / TIM1_CH2N 复用。标 FT → 5V 容忍。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PB14", "kind": "gpio" },
+        { "peripheral": "SPI2", "signal": "SPI2_MISO", "kind": "spi" },
+        { "peripheral": "USART3", "signal": "USART3_RTS", "kind": "uart" },
+        { "peripheral": "TIM1", "signal": "TIM1_CH2N", "kind": "tim" },
+        { "peripheral": "EXTI", "signal": "EXTI14", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.30 (PB14 I/O FT); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 27"
+    },
+    {
+      "pin": 28,
+      "name": "PB15",
+      "port": "PB15",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": true,
+      "note": "SPI2_MOSI / TIM1_CH3N 复用。标 FT → 5V 容忍。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PB15", "kind": "gpio" },
+        { "peripheral": "SPI2", "signal": "SPI2_MOSI", "kind": "spi" },
+        { "peripheral": "TIM1", "signal": "TIM1_CH3N", "kind": "tim" },
+        { "peripheral": "EXTI", "signal": "EXTI15", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.30 (PB15 I/O FT); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 28"
+    },
+    {
+      "pin": 29,
+      "name": "PA8",
+      "port": "PA8",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": true,
+      "note": "TIM1_CH1 / USART1_CK / MCO（RCC 时钟输出）复用。标 FT → 5V 容忍。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PA8", "kind": "gpio" },
+        { "peripheral": "TIM1", "signal": "TIM1_CH1", "kind": "tim" },
+        { "peripheral": "USART1", "signal": "USART1_CK", "kind": "uart" },
+        { "peripheral": "RCC", "signal": "MCO", "kind": "pwr", "note": "系统时钟输出，kind 归入 pwr（枚举无 clock）" },
+        { "peripheral": "EXTI", "signal": "EXTI8", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.31 (PA8 I/O FT); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 29"
+    },
+    {
+      "pin": 30,
+      "name": "PA9",
+      "port": "PA9",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": true,
+      "note": "USART1_TX 默认引脚（最常用串口 TX 之一）。TIM1_CH2 复用。标 FT → 5V 容忍。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PA9", "kind": "gpio" },
+        { "peripheral": "USART1", "signal": "USART1_TX", "kind": "uart", "note": "默认引脚；重映射后 USART1_TX 移到 PB6" },
+        { "peripheral": "TIM1", "signal": "TIM1_CH2", "kind": "tim" },
+        { "peripheral": "EXTI", "signal": "EXTI9", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.31 (PA9 I/O FT); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 30; STM32duino F103C8T PeripheralPins.c (USART1_TX)"
+    },
+    {
+      "pin": 31,
+      "name": "PA10",
+      "port": "PA10",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": true,
+      "note": "USART1_RX 默认引脚。TIM1_CH3 复用。标 FT → 5V 容忍。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PA10", "kind": "gpio" },
+        { "peripheral": "USART1", "signal": "USART1_RX", "kind": "uart", "note": "默认引脚；重映射后 USART1_RX 移到 PB7" },
+        { "peripheral": "TIM1", "signal": "TIM1_CH3", "kind": "tim" },
+        { "peripheral": "EXTI", "signal": "EXTI10", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.31 (PA10 I/O FT); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 31; STM32duino F103C8T PeripheralPins.c"
+    },
+    {
+      "pin": 32,
+      "name": "PA11",
+      "port": "PA11",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": true,
+      "note": "USB_DM（USB D-）/ CAN_RX / TIM1_CH4 / USART1_CTS 复用：USB 与 CAN 不能同时使用这组脚。标 FT → 5V 容忍。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PA11", "kind": "gpio" },
+        { "peripheral": "USB", "signal": "USB_DM", "kind": "usb", "note": "USB D-；与 CAN_RX 冲突" },
+        { "peripheral": "CAN", "signal": "CAN_RX", "kind": "can", "note": "与 USB_DM 冲突；可重映射到 PB8" },
+        { "peripheral": "TIM1", "signal": "TIM1_CH4", "kind": "tim" },
+        { "peripheral": "USART1", "signal": "USART1_CTS", "kind": "uart" },
+        { "peripheral": "EXTI", "signal": "EXTI11", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.31 (PA11 I/O FT); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 32; stm32-base Blue Pill (USB D- = PA11)"
+    },
+    {
+      "pin": 33,
+      "name": "PA12",
+      "port": "PA12",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": true,
+      "note": "USB_DP（USB D+）/ CAN_TX / TIM1_ETR / USART1_RTS 复用。标 FT → 5V 容忍。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PA12", "kind": "gpio" },
+        { "peripheral": "USB", "signal": "USB_DP", "kind": "usb", "note": "USB D+；与 CAN_TX 冲突" },
+        { "peripheral": "CAN", "signal": "CAN_TX", "kind": "can", "note": "与 USB_DP 冲突；可重映射到 PB9" },
+        { "peripheral": "TIM1", "signal": "TIM1_ETR", "kind": "tim" },
+        { "peripheral": "USART1", "signal": "USART1_RTS", "kind": "uart" },
+        { "peripheral": "EXTI", "signal": "EXTI12", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.31 (PA12 I/O FT); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 33; stm32-base Blue Pill (USB D+ = PA12)"
+    },
+    {
+      "pin": 34,
+      "name": "PA13",
+      "port": "PA13",
+      "type": "debug",
+      "io": true,
+      "fiveVTolerant": true,
+      "note": "PA13 = JTMS/SWDIO（SWD 数据线），复位后由 SWJ 占用。当普通 IO 需要在 AFIO_MAPR 中关闭 SWJ（通常等于放弃调试口），界面必须对这种分配给出冲突警告。数据手册标 FT → 5V 容忍（并非很多人以为的\"SWD 脚不 5V 容忍\"）。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PA13", "kind": "gpio", "note": "需先关闭 SWJ" },
+        { "peripheral": "SYS", "signal": "JTMS/SWDIO", "kind": "debug", "note": "SWD 数据线，默认使能" },
+        { "peripheral": "EXTI", "signal": "EXTI13", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.31 (PA13 I/O FT, default JTMS/SWDIO); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 34 (SYS_JTMS-SWDIO); stm32-base Blue Pill (SWD header DIO)"
+    },
+    {
+      "pin": 35,
+      "name": "VSS",
+      "port": null,
+      "type": "power",
+      "io": false,
+      "fiveVTolerant": false,
+      "note": "数字地（VSS_2）。非 IO。",
+      "functions": [
+        { "peripheral": "PWR", "signal": "VSS", "kind": "pwr" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.31 (VSS_2, Type S); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 35"
+    },
+    {
+      "pin": 36,
+      "name": "VDD",
+      "port": null,
+      "type": "power",
+      "io": false,
+      "fiveVTolerant": false,
+      "note": "数字电源（VDD_2），2.0-3.6V。非 IO。",
+      "functions": [
+        { "peripheral": "PWR", "signal": "VDD", "kind": "pwr" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.31 (VDD_2, Type S); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 36"
+    },
+    {
+      "pin": 37,
+      "name": "PA14",
+      "port": "PA14",
+      "type": "debug",
+      "io": true,
+      "fiveVTolerant": true,
+      "note": "PA14 = JTCK/SWCLK（SWD 时钟线），复位后由 SWJ 占用。与 PA13 一样，改为普通 IO 需关闭 SWJ。数据手册标 FT → 5V 容忍。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PA14", "kind": "gpio", "note": "需先关闭 SWJ" },
+        { "peripheral": "SYS", "signal": "JTCK/SWCLK", "kind": "debug", "note": "SWD 时钟线，默认使能" },
+        { "peripheral": "EXTI", "signal": "EXTI14", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.32 (PA14 I/O FT, default JTCK/SWCLK); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 37 (SYS_JTCK-SWCLK); stm32-base Blue Pill"
+    },
+    {
+      "pin": 38,
+      "name": "PA15",
+      "port": "PA15",
+      "type": "debug",
+      "io": true,
+      "fiveVTolerant": true,
+      "note": "默认 JTDI。作 GPIO / SPI1_NSS / TIM2_CH1_ETR 需要关闭 JTAG（只保留 SWD）。数据手册标 FT → 5V 容忍。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PA15", "kind": "gpio", "note": "需先关闭 JTAG" },
+        { "peripheral": "SYS", "signal": "JTDI", "kind": "debug", "note": "默认使能（JTAG 全使能状态）" },
+        { "peripheral": "SPI1", "signal": "SPI1_NSS", "kind": "spi", "note": "重映射 AFIO_SPI1_ENABLE；需关闭 JTAG" },
+        { "peripheral": "TIM2", "signal": "TIM2_CH1", "kind": "tim", "note": "重映射；需关闭 JTAG" },
+        { "peripheral": "TIM2", "signal": "TIM2_ETR", "kind": "tim", "note": "重映射；需关闭 JTAG" },
+        { "peripheral": "EXTI", "signal": "EXTI15", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.32 (PA15 I/O FT, default JTDI); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 38"
+    },
+    {
+      "pin": 39,
+      "name": "PB3",
+      "port": "PB3",
+      "type": "debug",
+      "io": true,
+      "fiveVTolerant": true,
+      "note": "默认 JTDO/TRACESWO。作 GPIO / SPI1_SCK / TIM2_CH2 需要关闭 JTAG（保留 SWD）。数据手册标 FT → 5V 容忍。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PB3", "kind": "gpio", "note": "需先关闭 JTAG" },
+        { "peripheral": "SYS", "signal": "JTDO/TRACESWO", "kind": "debug", "note": "默认使能" },
+        { "peripheral": "SPI1", "signal": "SPI1_SCK", "kind": "spi", "note": "重映射；需关闭 JTAG" },
+        { "peripheral": "TIM2", "signal": "TIM2_CH2", "kind": "tim", "note": "重映射；需关闭 JTAG" },
+        { "peripheral": "EXTI", "signal": "EXTI3", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.32 (PB3 I/O FT, default JTDO); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 39"
+    },
+    {
+      "pin": 40,
+      "name": "PB4",
+      "port": "PB4",
+      "type": "debug",
+      "io": true,
+      "fiveVTolerant": true,
+      "note": "默认 NJTRST。作 GPIO / SPI1_MISO / TIM3_CH1 需要关闭 JTAG（保留 SWD）。数据手册标 FT → 5V 容忍。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PB4", "kind": "gpio", "note": "需先关闭 JTAG" },
+        { "peripheral": "SYS", "signal": "NJTRST", "kind": "debug", "note": "默认使能" },
+        { "peripheral": "SPI1", "signal": "SPI1_MISO", "kind": "spi", "note": "重映射；需关闭 JTAG" },
+        { "peripheral": "TIM3", "signal": "TIM3_CH1", "kind": "tim", "note": "重映射；需关闭 JTAG" },
+        { "peripheral": "EXTI", "signal": "EXTI4", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.32 (PB4 I/O FT, default JNTRST); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 40"
+    },
+    {
+      "pin": 41,
+      "name": "PB5",
+      "port": "PB5",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": false,
+      "note": "不确定项：DS5319 Rev 19 Table 5 中 PB5 的 I/O structure 列为空（未标 FT），而相邻的 PB4/PB6 都标了 FT；ST 社区存在 \"Is PB5 really not 5V tolerant?\" 讨论帖。本文件按【非 5V 容忍】保守处理并标 verified:false —— 接 5V 信号前请实测或查最新版手册确认。复用：I2C1_SMBAI / SPI1_MOSI / TIM3_CH2。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PB5", "kind": "gpio" },
+        { "peripheral": "I2C1", "signal": "I2C1_SMBA", "kind": "i2c" },
+        { "peripheral": "SPI1", "signal": "SPI1_MOSI", "kind": "spi", "note": "重映射 AFIO_SPI1_ENABLE" },
+        { "peripheral": "TIM3", "signal": "TIM3_CH2", "kind": "tim", "note": "重映射；且与 SPI1_MOSI 复用时受 CubeMX 条件约束(BZ#83533)" },
+        { "peripheral": "EXTI", "signal": "EXTI5", "kind": "exti" }
+      ],
+      "verified": false,
+      "source": "DS5319 Rev19 Table5 p.32 (PB5 行未见 FT 标记，与 PB4/PB6 对比); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 41; ST community \"Is PB5 really not 5V tolerant?\" https://community.st.com/t5/stm32-mcus-products/is-pb5-really-not-5v-tolerant/td-p/561044"
+    },
+    {
+      "pin": 42,
+      "name": "PB6",
+      "port": "PB6",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": true,
+      "note": "I2C1_SCL 默认引脚（重映射后 I2C1_SCL 移到 PB8）。USART1_TX（重映射）/ TIM4_CH1 复用。标 FT → 5V 容忍。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PB6", "kind": "gpio" },
+        { "peripheral": "I2C1", "signal": "I2C1_SCL", "kind": "i2c", "note": "默认引脚；重映射后移到 PB8" },
+        { "peripheral": "USART1", "signal": "USART1_TX", "kind": "uart", "note": "重映射 AFIO_USART1_ENABLE" },
+        { "peripheral": "TIM4", "signal": "TIM4_CH1", "kind": "tim" },
+        { "peripheral": "EXTI", "signal": "EXTI6", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.32 (PB6 I/O FT); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 42; STM32duino F103C8T PeripheralPins.c (I2C1_SCL / USART1_TX remap)"
+    },
+    {
+      "pin": 43,
+      "name": "PB7",
+      "port": "PB7",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": true,
+      "note": "I2C1_SDA 默认引脚（重映射后移到 PB9）。USART1_RX（重映射）/ TIM4_CH2 复用。标 FT → 5V 容忍。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PB7", "kind": "gpio" },
+        { "peripheral": "I2C1", "signal": "I2C1_SDA", "kind": "i2c", "note": "默认引脚；重映射后移到 PB9" },
+        { "peripheral": "USART1", "signal": "USART1_RX", "kind": "uart", "note": "重映射 AFIO_USART1_ENABLE" },
+        { "peripheral": "TIM4", "signal": "TIM4_CH2", "kind": "tim" },
+        { "peripheral": "EXTI", "signal": "EXTI7", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.32 (PB7 I/O FT); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 43; STM32duino F103C8T PeripheralPins.c"
+    },
+    {
+      "pin": 44,
+      "name": "BOOT0",
+      "port": null,
+      "type": "boot",
+      "io": false,
+      "fiveVTolerant": false,
+      "note": "专用启动模式选择脚（非 GPIO，无复用功能）。复位时 BOOT0=0 → 从主 Flash 启动；BOOT0=1 → 从系统存储器（内置 Bootloader）启动（配合 PB2/BOOT1）。芯片内部无上拉/下拉保证，通常需外部下拉（Blue Pill 上为 10k 下拉 + 跳线）。",
+      "functions": [
+        { "peripheral": "BOOT", "signal": "BOOT0", "kind": "boot" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.32 (BOOT0, Type I); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 44 (Type Boot); stm32-base Blue Pill (BOOT0 jumper)"
+    },
+    {
+      "pin": 45,
+      "name": "PB8",
+      "port": "PB8",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": true,
+      "note": "TIM4_CH3 默认；I2C1_SCL 与 CAN_RX 为重映射功能（三者同一时刻只能用一个）。标 FT → 5V 容忍。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PB8", "kind": "gpio" },
+        { "peripheral": "TIM4", "signal": "TIM4_CH3", "kind": "tim" },
+        { "peripheral": "I2C1", "signal": "I2C1_SCL", "kind": "i2c", "note": "重映射 AFIO_I2C1_ENABLE" },
+        { "peripheral": "CAN", "signal": "CAN_RX", "kind": "can", "note": "重映射 AFIO_CAN1_2" },
+        { "peripheral": "EXTI", "signal": "EXTI8", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.33 (PB8 I/O FT); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 45; STM32duino F103C8T PeripheralPins.c"
+    },
+    {
+      "pin": 46,
+      "name": "PB9",
+      "port": "PB9",
+      "type": "gpio",
+      "io": true,
+      "fiveVTolerant": true,
+      "note": "TIM4_CH4 默认；I2C1_SDA 与 CAN_TX 为重映射功能。标 FT → 5V 容忍。",
+      "functions": [
+        { "peripheral": "GPIO", "signal": "PB9", "kind": "gpio" },
+        { "peripheral": "TIM4", "signal": "TIM4_CH4", "kind": "tim" },
+        { "peripheral": "I2C1", "signal": "I2C1_SDA", "kind": "i2c", "note": "重映射 AFIO_I2C1_ENABLE" },
+        { "peripheral": "CAN", "signal": "CAN_TX", "kind": "can", "note": "重映射 AFIO_CAN1_2" },
+        { "peripheral": "EXTI", "signal": "EXTI9", "kind": "exti" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.33 (PB9 I/O FT); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 46; STM32duino F103C8T PeripheralPins.c"
+    },
+    {
+      "pin": 47,
+      "name": "VSS",
+      "port": null,
+      "type": "power",
+      "io": false,
+      "fiveVTolerant": false,
+      "note": "数字地（VSS_3）。非 IO。",
+      "functions": [
+        { "peripheral": "PWR", "signal": "VSS", "kind": "pwr" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.33 (VSS_3, Type S); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 47"
+    },
+    {
+      "pin": 48,
+      "name": "VDD",
+      "port": null,
+      "type": "power",
+      "io": false,
+      "fiveVTolerant": false,
+      "note": "数字电源（VDD_3），2.0-3.6V。非 IO。",
+      "functions": [
+        { "peripheral": "PWR", "signal": "VDD", "kind": "pwr" }
+      ],
+      "verified": true,
+      "source": "DS5319 Rev19 Table5 p.33 (VDD_3, Type S); STM32_open_pin_data STM32F103C(8-B)Tx.xml Position 48"
+    }
+  ]
+}

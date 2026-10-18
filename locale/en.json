@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "STM32 Workbench",
+    "description": "Build, flash and observe STM32F103C8T6 firmware inside DSH: Keil AC5 builds, ST-Link/OpenOCD flashing, pin planning, serial console and plain-language feature spec."
+  }
+}

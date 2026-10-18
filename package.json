@@ -1,0 +1,47 @@
+{
+  "name": "dsh-plugin-stm32-workbench",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "description": "STM32F103C8T6 开发工作台：在 DSH 会话里直接编译、烧录、看串口、规划引脚。",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": ["@deepseek-ai/dsh-client-ui-conversation"]
+    }
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "PORTING.md",
+    "ISSUES.md",
+    "locale/en.json",
+    "locale/zh.json",
+    "icon.svg",
+    "backend/package.json",
+    "backend/README.md",
+    "backend/AGENT.md",
+    "backend/server",
+    "backend/scripts",
+    "backend/data",
+    "backend/firmware/bsp",
+    "backend/firmware/projects",
+    "backend/firmware/template",
+    "backend/tools/openocd",
+    "backend/web"
+  ],
+  "//files": "发布白名单（照 dsh-openwrite 的做法）：只带代码、引脚数据与自带测试工程。构建产物（backend/firmware/build）与运行期状态（现在落在被选工程目录的 .dsh-mcu/ 下）都不进包 —— 插件本体拷到别的机器就是干净的一份。便携 OpenOCD（backend/tools/openocd，7.6 MB 第三方 GPL 二进制）**不提交进 git 仓库**，由 backend/scripts/fetch-openocd.ps1 按需下载；files 里保留该路径是为了「本地已准备工具链时」npm 打包可一起带走。locale/ 与 icon.svg 是 DSH 0.2.1 起设置页/插件市场要求的显示元数据（skill 的 host-plugin.md「Display metadata and icon」清单）：缺了会退回包名与默认图。"
+}

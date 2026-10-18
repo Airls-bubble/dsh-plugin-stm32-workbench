@@ -1,0 +1,6 @@
+{
+  "name": "stm32-workbench-backend",
+  "private": true,
+  "type": "commonjs",
+  "//": "这个文件是必需的：上层插件包声明了 type=module，Node 会据此把 backend/ 下的 .js 当 ESM 解析，而后端是 CommonJS（require）。就近的这个 package.json 把解析方式改回 commonjs。"
+}

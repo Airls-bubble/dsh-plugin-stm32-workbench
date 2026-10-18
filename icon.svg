@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="STM32 workbench">
+  <!-- 原创图标：蓝色 OLED 屏 + 引脚化的 MCU。仅使用图形与单色，适配深浅主题。 -->
+  <rect x="2" y="2" width="60" height="60" rx="12" fill="#0f2740"/>
+  <rect x="8" y="10" width="48" height="30" rx="4" fill="#0a1b2a" stroke="#3fa9f5" stroke-width="2"/>
+  <g fill="#3fa9f5">
+    <rect x="13" y="16" width="20" height="3" rx="1.5"/>
+    <rect x="13" y="22" width="30" height="3" rx="1.5"/>
+    <rect x="13" y="28" width="14" height="3" rx="1.5"/>
+    <rect x="30" y="28" width="12" height="3" rx="1.5" opacity="0.65"/>
+  </g>
+  <rect x="18" y="44" width="28" height="12" rx="3" fill="#1c3b57" stroke="#8fc9f9" stroke-width="2"/>
+  <g stroke="#8fc9f9" stroke-width="2" stroke-linecap="round">
+    <path d="M24 44v12M32 44v12M40 44v12"/>
+    <path d="M18 50H10M46 50h8"/>
+  </g>
+  <circle cx="32" cy="18" r="2.5" fill="#7fe0a8"/>
+</svg>

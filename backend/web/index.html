@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STM32 工作台 · STM32F103C8T6</title>
+<meta name="description" content="STM32F103C8T6 离线可用的引脚规划 / 构建 / 烧录 / 串口工作台">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<a class="skip-link" href="#main">跳到主内容</a>
+
+<!-- ───────────────────────── 顶栏：芯片身份 + 后端状态 ───────────────────────── -->
+<header class="app-header">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true">STM32</span>
+    <span class="brand-name">工作台</span>
+  </div>
+
+  <div class="chip-id" title="当前目标器件">
+    <span class="chip-name" id="chipName">STM32F103C8T6</span>
+    <span class="chip-pkg" id="chipPackage">LQFP48</span>
+    <span class="chip-meta" id="chipMeta">Flash 64 KB · RAM 20 KB · 72 MHz</span>
+    <span class="chip-src" id="pinSource" title="引脚数据来源">引脚数据：内置兜底表</span>
+  </div>
+
+  <div class="backend-bar">
+    <span class="dot" id="backendDot" data-state="unknown" aria-hidden="true"></span>
+    <span id="backendText" class="backend-text" role="status">正在探测后端 /api/env …</span>
+    <button type="button" class="btn btn-sm" id="btnDetect" title="重新探测编译器 / 烧录器 / 串口">重新探测</button>
+    <label class="field-inline" title="主题只影响显示">
+      <span class="field-label">主题</span>
+      <select id="themeSelect">
+        <option value="auto">跟随系统</option>
+        <option value="light">浅色</option>
+        <option value="dark">深色</option>
+      </select>
+    </label>
+  </div>
+</header>
+
+<!-- 环境详情条：后端可用时填充；不可用时显示启动命令 -->
+<div class="env-strip" id="envStrip">
+  <div class="env-item">
+    <span class="env-key">后端</span>
+    <span class="env-val" id="envHost">未探测</span>
+  </div>
+  <div class="env-item">
+    <span class="env-key">编译器</span>
+    <span class="env-val" id="envCompilers">—</span>
+  </div>
+  <div class="env-item">
+    <span class="env-key">烧录器</span>
+    <span class="env-val" id="envFlashers">—</span>
+  </div>
+  <div class="env-item">
+    <span class="env-key">串口</span>
+    <span class="env-val" id="envSerial">—</span>
+  </div>
+  <div class="env-item env-item-wide">
+    <span class="env-key">启动</span>
+    <span class="env-val mono" id="envHint">node server/index.js</span>
+  </div>
+</div>
+
+<!-- ───────────────────────── 工作区切换 ───────────────────────── -->
+<nav class="tabs" role="tablist" aria-label="工作区">
+  <button type="button" role="tab" id="tab-pins"   aria-controls="view-pins"   aria-selected="true"  tabindex="0"  class="tab" data-view="pins">引脚规划</button>
+  <button type="button" role="tab" id="tab-build"  aria-controls="view-build"  aria-selected="false" tabindex="-1" class="tab" data-view="build">构建台</button>
+  <button type="button" role="tab" id="tab-flash"  aria-controls="view-flash"  aria-selected="false" tabindex="-1" class="tab" data-view="flash">烧录</button>
+  <button type="button" role="tab" id="tab-serial" aria-controls="view-serial" aria-selected="false" tabindex="-1" class="tab" data-view="serial">串口台</button>
+  <button type="button" role="tab" id="tab-calc"   aria-controls="view-calc"   aria-selected="false" tabindex="-1" class="tab" data-view="calc">计算器</button>
+  <span class="tabs-spacer"></span>
+  <button type="button" class="btn btn-sm only-narrow" id="btnSidebar" aria-expanded="false" aria-controls="sidebar">项目与环境</button>
+</nav>
+
+<div class="app-body">
+  <!-- ───────────────────────── 侧栏：项目 + 环境 ───────────────────────── -->
+  <aside class="sidebar" id="sidebar" aria-label="项目与环境">
+    <section class="side-block">
+      <header class="side-head">
+        <h2>项目</h2>
+        <button type="button" class="btn btn-sm" id="btnNewProject">新建</button>
+      </header>
+      <p class="side-note">当前项目：<b id="currentProject">未选择</b></p>
+      <ul class="project-list" id="projectList">
+        <li class="empty">尚未加载项目列表</li>
+      </ul>
+      <div class="side-actions">
+        <button type="button" class="btn btn-sm" id="btnRefreshProjects">刷新列表</button>
+      </div>
+    </section>
+
+    <section class="side-block">
+      <header class="side-head"><h2>环境详情</h2></header>
+      <dl class="kv" id="envDetail">
+        <dt>状态</dt><dd id="envDetailState">未探测</dd>
+      </dl>
+    </section>
+
+    <section class="side-block">
+      <header class="side-head"><h2>说明</h2></header>
+      <p class="side-note">
+        引脚图与计算器是纯前端逻辑，后端未启动也能用。<br>
+        构建 / 烧录 / 串口需要后端 <span class="mono">/api</span> 同源服务。
+      </p>
+    </section>
+  </aside>
+
+  <!-- ───────────────────────── 主内容 ───────────────────────── -->
+  <main class="content" id="main" tabindex="-1">
+
+    <!-- ═══════════ 视图 1：引脚规划 ═══════════ -->
+    <section class="view" id="view-pins" role="tabpanel" aria-labelledby="tab-pins">
+      <div class="toolbar">
+        <label class="switch" title="开启后点击引脚即可直接把功能分配到引脚">
+          <input type="checkbox" id="assignMode">
+          <span>分配模式</span>
+        </label>
+        <span class="toolbar-sep" aria-hidden="true"></span>
+        <label class="field-inline">
+          <span class="field-label">着色</span>
+          <select id="padColorMode">
+            <option value="assign">按分配状态</option>
+            <option value="port">按端口</option>
+            <option value="type">按引脚类型</option>
+          </select>
+        </label>
+        <span class="toolbar-sep" aria-hidden="true"></span>
+        <button type="button" class="btn btn-sm" id="btnClearAssign">清空全部分配</button>
+        <button type="button" class="btn btn-sm" id="btnResetView">清空选中</button>
+        <span class="spacer"></span>
+        <span class="hint" id="assignModeHint" role="status">点击引脚查看详情</span>
+      </div>
+
+      <div class="pin-grid">
+        <!-- 左：LQFP48 图 -->
+        <div class="pin-canvas-col">
+          <div class="panel pad-panel">
+            <div class="panel-head">
+              <h3>LQFP48 引脚图 <span class="dim">（顶视图 · 逆时针编号）</span></h3>
+              <span class="mono dim" id="pinGeoNote">1-12 左·13-24 下·25-36 右·37-48 上</span>
+            </div>
+            <div class="pin-canvas-scroll" id="pinCanvasWrap" tabindex="0" role="group"
+                 aria-label="LQFP48 引脚图；用 Tab 聚焦引脚，方向键切换，回车选中">
+              <svg id="pinSvg" viewBox="0 0 700 660" role="img"
+                   aria-label="STM32F103C8T6 LQFP48 引脚图，48 个可聚焦引脚"></svg>
+            </div>
+            <div class="legend" id="pinLegend"></div>
+            <p class="hint">
+              键盘：<kbd>Tab</kbd> 进入引脚图 · <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> 切换引脚 ·
+              <kbd>Enter</kbd>/<kbd>Space</kbd> 选中 · <kbd>Esc</kbd> 取消选中
+            </p>
+          </div>
+        </div>
+
+        <!-- 右：详情 / 分配 / 冲突 / 代码 -->
+        <div class="pin-side-col">
+          <section class="panel" id="pinDetailPanel">
+            <div class="panel-head">
+              <h3 id="pinDetailTitle">引脚详情</h3>
+              <span class="badge" id="pinDetailBadge" hidden></span>
+            </div>
+            <div id="pinDetailBody" class="pin-detail">
+              <p class="empty">未选中引脚。点击引脚图中的焊盘，或在上方切换。</p>
+            </div>
+            <div id="pinAssignBox" hidden>
+              <h4 class="sub">分配功能 <span class="dim" id="assignBoxHint">（只读：打开工具栏的「分配模式」后可点击分配）</span></h4>
+              <div class="chip-row" id="pinRoleButtons"></div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h3>功能分配</h3>
+              <span class="dim" id="assignCount">0 项</span>
+            </div>
+            <div class="table-scroll">
+              <table class="grid">
+                <thead>
+                  <tr><th scope="col">功能角色</th><th scope="col">外设通道</th><th scope="col">引脚</th><th scope="col">操作</th></tr>
+                </thead>
+                <tbody id="assignRows">
+                  <tr class="empty-row"><td colspan="4">还没有分配任何功能</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="panel" id="conflictPanel">
+            <div class="panel-head">
+              <h3>冲突检查</h3>
+              <span class="badge" id="conflictCount">无冲突</span>
+            </div>
+            <ul class="issue-list" id="conflictList">
+              <li class="issue issue-ok">当前分配未发现冲突</li>
+            </ul>
+          </section>
+        </div>
+      </div>
+
+      <!-- 代码片段 -->
+      <section class="panel">
+        <div class="panel-head">
+          <h3>引脚初始化 C 片段 <span class="dim">（CMSIS 寄存器级，与 firmware/bsp 一致）</span></h3>
+          <div class="head-actions">
+            <button type="button" class="btn btn-sm" id="btnGenCode">重新生成</button>
+            <button type="button" class="btn btn-sm btn-primary" id="btnCopyCode">复制</button>
+            <button type="button" class="btn btn-sm" id="btnDownloadCode">下载 .c</button>
+            <span class="status-inline" id="copyStatus" role="status"></span>
+          </div>
+        </div>
+        <pre class="code" id="codeOut" tabindex="0" aria-label="生成的引脚初始化 C 代码">/* 尚未分配功能。分配后这里会生成 GPIO/USART/I2C/SPI/ADC/TIM/EXTI 的初始化片段。 */</pre>
+        <p class="hint" id="codeWarn" hidden></p>
+      </section>
+
+      <!-- 无图形环境 / 需要逐条核对时的列表 -->
+      <details class="panel">
+        <summary>引脚列表（48 脚，可键盘逐条查阅）</summary>
+        <div class="table-scroll">
+          <table class="grid" id="pinTable">
+            <thead>
+              <tr>
+                <th scope="col">脚号</th><th scope="col">名称</th><th scope="col">类型</th>
+                <th scope="col">5V 容忍</th><th scope="col">已分配</th><th scope="col">操作</th>
+              </tr>
+            </thead>
+            <tbody id="pinTableBody"></tbody>
+          </table>
+        </div>
+      </details>
+    </section>
+
+    <!-- ═══════════ 视图 2：构建台 ═══════════ -->
+    <section class="view" id="view-build" role="tabpanel" aria-labelledby="tab-build" hidden>
+      <div class="toolbar">
+        <span class="field-inline">
+          <span class="field-label">项目</span>
+          <b id="buildProject" class="mono">未选择</b>
+        </span>
+        <span class="toolbar-sep" aria-hidden="true"></span>
+        <button type="button" class="btn btn-primary" id="btnBuild">开始构建</button>
+        <button type="button" class="btn btn-sm" id="btnCancelBuild" disabled>中止</button>
+        <button type="button" class="btn btn-sm" id="btnClearBuildLog">清空日志</button>
+        <span class="spacer"></span>
+        <span class="status" id="buildStatus" role="status">就绪</span>
+      </div>
+
+      <div class="build-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <h3>构建日志</h3>
+            <span class="dim mono" id="buildLogMeta">0 行</span>
+          </div>
+          <pre class="log" id="buildLog" role="log" aria-live="off" tabindex="0"></pre>
+        </section>
+
+        <div class="stack">
+          <section class="panel">
+            <div class="panel-head"><h3>ROM / RAM 占用</h3></div>
+            <div class="meter">
+              <div class="meter-label"><span>Flash (ROM)</span><span class="mono" id="romText">— / 64 KB</span></div>
+              <div class="meter-track"><div class="meter-fill" id="romBar" style="width:0%"></div></div>
+            </div>
+            <div class="meter">
+              <div class="meter-label"><span>RAM</span><span class="mono" id="ramText">— / 20 KB</span></div>
+              <div class="meter-track"><div class="meter-fill" id="ramBar" style="width:0%"></div></div>
+            </div>
+            <pre class="code code-sm" id="sizeText">尚未构建</pre>
+            <p class="hint">ROM = .text + .data，RAM = .data + .bss（来自构建结束事件 size 字段）。</p>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head"><h3>产物</h3></div>
+            <ul class="artifact-list" id="buildArtifacts">
+              <li class="empty">构建成功后显示 .axf / .hex / .bin 路径</li>
+            </ul>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════ 视图 3：烧录 ═══════════ -->
+    <section class="view" id="view-flash" role="tabpanel" aria-labelledby="tab-flash" hidden>
+      <div class="banner banner-warn" id="flasherWarn" hidden>
+        <b>未检测到 ST-Link。</b>
+        <span>接入 ST-Link 并安装 OpenOCD / ST-Link 驱动后点「重新探测」。离线状态下烧录与读芯片信息不可用。</span>
+      </div>
+
+      <div class="toolbar">
+        <span class="field-inline">
+          <span class="field-label">项目</span>
+          <b id="flashProject" class="mono">未选择</b>
+        </span>
+        <label class="field-inline">
+          <span class="field-label">烧录器</span>
+          <select id="flasherSelect"><option value="">自动</option></select>
+        </label>
+        <label class="switch"><input type="checkbox" id="verifyAfterFlash" checked><span>烧录后校验</span></label>
+        <span class="toolbar-sep" aria-hidden="true"></span>
+        <button type="button" class="btn btn-primary" id="btnFlash">烧录</button>
+        <button type="button" class="btn" id="btnReset">复位运行</button>
+        <button type="button" class="btn" id="btnChipInfo">读芯片信息</button>
+        <button type="button" class="btn btn-sm" id="btnClearFlashLog">清空日志</button>
+        <span class="spacer"></span>
+        <span class="status" id="flashStatus" role="status">就绪</span>
+      </div>
+
+      <div class="build-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <h3>烧录日志</h3>
+            <span class="dim mono" id="flashLogMeta">0 行</span>
+          </div>
+          <pre class="log" id="flashLog" role="log" aria-live="off" tabindex="0"></pre>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h3>芯片信息</h3></div>
+          <pre class="code code-sm" id="chipInfoOut">尚未读取</pre>
+          <p class="hint">由 <span class="mono">POST /api/chip-info</span> 返回的日志流解析；无硬件时不要期待结果。</p>
+        </section>
+      </div>
+    </section>
+
+    <!-- ═══════════ 视图 4：串口台 ═══════════ -->
+    <section class="view" id="view-serial" role="tabpanel" aria-labelledby="tab-serial" hidden>
+      <div class="toolbar toolbar-wrap">
+        <label class="field-inline">
+          <span class="field-label">端口</span>
+          <select id="serialPort"><option value="">（未探测）</option></select>
+        </label>
+        <button type="button" class="btn btn-sm" id="btnRefreshPorts">刷新端口</button>
+        <label class="field-inline">
+          <span class="field-label">波特率</span>
+          <select id="serialBaud">
+            <option>9600</option><option>19200</option><option>38400</option><option>57600</option>
+            <option selected>115200</option><option>230400</option><option>460800</option><option>921600</option>
+          </select>
+        </label>
+        <span class="toolbar-sep" aria-hidden="true"></span>
+        <button type="button" class="btn btn-primary" id="btnSerialOpen">打开</button>
+        <button type="button" class="btn" id="btnSerialClose" disabled>关闭</button>
+        <span class="status" id="serialState" role="status">已关闭</span>
+      </div>
+
+      <div class="toolbar toolbar-wrap">
+        <label class="switch"><input type="checkbox" id="chkHex"><span>16 进制显示</span></label>
+        <label class="switch"><input type="checkbox" id="chkTimestamp" checked><span>时间戳</span></label>
+        <label class="switch"><input type="checkbox" id="chkAutoscroll" checked><span>自动滚动</span></label>
+        <button type="button" class="btn btn-sm" id="btnClearSerial">清空</button>
+        <span class="spacer"></span>
+        <span class="dim mono" id="serialStats">收 0 B · 发 0 B</span>
+      </div>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h3>接收</h3>
+          <span class="dim" id="serialStreamState">未连接</span>
+        </div>
+        <pre class="log log-serial" id="serialLog" role="log" aria-live="off" tabindex="0"></pre>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h3>发送</h3></div>
+        <div class="send-row">
+          <textarea id="serialInput" rows="2" class="mono" placeholder="输入要发送的文本；勾选「按 HEX 发送」时填 AA 55 01 02"></textarea>
+          <div class="send-side">
+            <label class="switch"><input type="checkbox" id="chkSendHex"><span>按 HEX 发送</span></label>
+            <label class="switch"><input type="checkbox" id="chkAppendCRLF" checked><span>追加 CRLF</span></label>
+            <button type="button" class="btn btn-primary" id="btnSend" disabled>发送</button>
+          </div>
+        </div>
+        <p class="hint" id="sendHint">未打开串口。发送的字节会同时显示在接收区（前缀 TX）。</p>
+      </section>
+    </section>
+
+    <!-- ═══════════ 视图 5：计算器 ═══════════ -->
+    <section class="view" id="view-calc" role="tabpanel" aria-labelledby="tab-calc" hidden>
+      <div class="calc-grid">
+
+        <!-- 定时器 -->
+        <section class="panel">
+          <div class="panel-head">
+            <h3>定时器定时周期</h3>
+            <span class="dim">TIM1/2/3/4 · 16 位</span>
+          </div>
+          <div class="form-grid">
+            <label class="field">
+              <span class="field-label">定时器时钟 TIMxCLK（Hz）</span>
+              <input type="number" id="tClk" value="72000000" min="1" step="1000" class="mono">
+            </label>
+            <label class="field">
+              <span class="field-label">预设</span>
+              <select id="tClkPreset">
+                <option value="72000000">72 MHz（APB1 36MHz×2 / APB2 72MHz）</option>
+                <option value="36000000">36 MHz（APB1 未倍频）</option>
+                <option value="64000000">64 MHz（PLL 倍频）</option>
+                <option value="8000000">8 MHz（HSI 直出）</option>
+                <option value="">自定义</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="field-label">预分频 PSC（0–65535）</span>
+              <input type="number" id="tPsc" value="7199" min="0" max="65535" step="1" class="mono">
+            </label>
+            <label class="field">
+              <span class="field-label">自动重装 ARR（0–65535）</span>
+              <input type="number" id="tArr" value="9999" min="0" max="65535" step="1" class="mono">
+            </label>
+          </div>
+          <output class="result-grid" id="timerOut" aria-live="polite"></output>
+
+          <h4 class="sub">反解：按目标周期求 PSC / ARR</h4>
+          <div class="form-grid form-grid-2">
+            <label class="field">
+              <span class="field-label">目标周期</span>
+              <input type="number" id="tTarget" value="100" min="0.000001" step="any" class="mono">
+            </label>
+            <label class="field">
+              <span class="field-label">单位</span>
+              <select id="tTargetUnit">
+                <option value="1e-6">µs</option>
+                <option value="1e-3" selected>ms</option>
+                <option value="1">s</option>
+              </select>
+            </label>
+            <button type="button" class="btn" id="btnTimerSolve">求解并回填</button>
+          </div>
+          <p class="hint">反解取满足条件的最大 PSC，使 ARR 尽量大（分辨率最高）；回填后以右侧公式结果为准。</p>
+        </section>
+
+        <!-- USART -->
+        <section class="panel">
+          <div class="panel-head">
+            <h3>USART 波特率 BRR</h3>
+            <span class="dim">F1 仅 16 倍过采样</span>
+          </div>
+          <div class="form-grid">
+            <label class="field">
+              <span class="field-label">外设时钟 PCLK（Hz）</span>
+              <input type="number" id="uClk" value="72000000" min="1" step="1000" class="mono">
+            </label>
+            <label class="field">
+              <span class="field-label">预设</span>
+              <select id="uClkPreset">
+                <option value="72000000">72 MHz（USART1 @ APB2）</option>
+                <option value="36000000">36 MHz（USART2/3 @ APB1）</option>
+                <option value="48000000">48 MHz</option>
+                <option value="8000000">8 MHz（HSI）</option>
+                <option value="">自定义</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="field-label">目标波特率（bit/s）</span>
+              <input type="number" id="uBaud" value="115200" min="1" step="1" class="mono" list="baudList">
+              <datalist id="baudList">
+                <option value="9600"></option><option value="19200"></option><option value="38400"></option>
+                <option value="57600"></option><option value="115200"></option><option value="230400"></option>
+                <option value="460800"></option><option value="921600"></option>
+              </datalist>
+            </label>
+          </div>
+          <output class="result-grid" id="usartOut" aria-live="polite"></output>
+          <p class="hint">
+            BRR = DIV_Mantissa&lt;&lt;4 | DIV_Fraction；USARTDIV = PCLK / (16 × baud)，小数部分按 1/16 就近取整并处理进位。
+            误差 =（实际 − 目标）/ 目标。
+          </p>
+          <h4 class="sub">常用波特率误差对照（用上面的 PCLK）</h4>
+          <div class="table-scroll">
+            <table class="grid">
+              <thead><tr><th scope="col">波特率</th><th scope="col">BRR</th><th scope="col">实际</th><th scope="col">误差</th></tr></thead>
+              <tbody id="baudTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<footer class="app-footer">
+  <span>STM32 工作台 · 前端纯静态（无外部依赖）</span>
+  <span class="dim">引脚数据优先取 <span class="mono">GET /api/pins</span>，失败时用内置兜底表；引脚功能以 ST 数据手册为准。</span>
+</footer>
+
+<!-- 新建项目对话框 -->
+<dialog id="dlgNewProject" class="dialog">
+  <form method="dialog" id="npForm">
+    <h3>新建项目</h3>
+    <label class="field">
+      <span class="field-label">项目 ID（字母/数字/短横线）</span>
+      <input type="text" id="npId" class="mono" required pattern="[A-Za-z0-9_-]{1,32}" placeholder="my-blink">
+    </label>
+    <label class="field">
+      <span class="field-label">名称</span>
+      <input type="text" id="npName" required placeholder="我的闪烁工程">
+    </label>
+    <label class="field">
+      <span class="field-label">模板</span>
+      <select id="npTemplate"><option value="">（需后端提供 /api/templates）</option></select>
+    </label>
+    <p class="error" id="npError" hidden></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn" id="npCancel">取消</button>
+      <button type="submit" class="btn btn-primary" id="npSubmit">创建</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+<noscript><p class="noscript">本页面需要 JavaScript 才能渲染引脚图与计算器。</p></noscript>
+
+<script src="pinout.js"></script>
+<script src="calc.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+# stm32-workbench —— 插件本体只装代码
+#
+# 运行期数据**故意不落在插件目录里**（规则见 backend/server/paths.js）：
+#   · 跟工程有关的一切（构建产物、账本、日志、源码备份、UV4 参照）→ <被选工程目录>/.dsh-mcu/
+#   · 跨工程的记忆（上次打开哪个工程）                        → <DSH_HOME>/mcu/recent.json
+# 所以插件目录拷到别的机器就是干净的一份，不需要先做清理。
+#
+# 下面两条是给**老版本遗留**兜底：升级前它们确实长在插件里，迁移代码会把内容搬走。
+backend/firmware/build/
+backend/build/
+
+# 便携 OpenOCD：约 7.6 MB / 1132 个第三方 GPL 二进制文件，**故意不提交**。
+# 用 backend/scripts/fetch-openocd.ps1 从官方 xPack release 一键下载（含 sha256 校验）。
+backend/tools/openocd/
+backend/tools/_download/
+
+# 编辑器 / 系统产物
+node_modules/
+*.log
+.DS_Store
+Thumbs.db

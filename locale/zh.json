@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "STM32 工作台",
+    "description": "在 DSH 里编译、烧录、观察 STM32F103C8T6 固件：Keil AC5 构建、ST-Link/OpenOCD 烧录、引脚规划、串口面板，以及给人读的功能描述。"
+  }
+}

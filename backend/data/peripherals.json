@@ -1,0 +1,278 @@
+{
+  "mcu": "STM32F103C8T6",
+  "package": "LQFP48",
+  "pinNumbering": "LQFP48，pins[] 中的数字即引脚号 1..48（与 pins.json 一致）",
+  "sources": [
+    {
+      "id": "DS5319",
+      "what": "ST DS5319 Rev 19 (STM32F103x8/xB) Table 5 pin definitions + notes：各外设默认引脚与可重映射引脚（注释 9：标注 (9) 的复用功能可重映射）。",
+      "url": "https://www.st.com/resource/en/datasheet/stm32f103c8.pdf"
+    },
+    {
+      "id": "STM32_open_pin_data",
+      "what": "ST 官方 CubeMX 引脚库 STM32F103C(8-B)Tx.xml：逐脚 Signal 列表（ADC1/ADC2、TIM1-4、USART1-3、SPI1-2、I2C1-2、CAN、USB、SYS_JTAG/SWD、RCC OSC），是本文件映射的主要依据。",
+      "url": "https://github.com/STMicroelectronics/STM32_open_pin_data/blob/master/mcu/STM32F103C(8-B)Tx.xml"
+    },
+    {
+      "id": "STM32duino",
+      "what": "STM32duino Arduino_Core_STM32 F103C8T_F103CB(T-U)/PeripheralPins.c（CubeMX DB 生成）：用于核对每个外设的\"默认脚 + 重映射脚\"与 AFIO 开关。",
+      "url": "https://github.com/stm32duino/Arduino_Core_STM32/blob/main/variants/STM32F1xx/F103C8T_F103CB(T-U)/PeripheralPins.c"
+    },
+    {
+      "id": "RM0008",
+      "what": "ST RM0008：AFIO 重映射寄存器(AFIO_MAPR)、EXTI 线到端口的选择(AFIO_EXTICR)、SWJ_CFG 说明的背景依据（原文为 PDF，未能抓取逐字核对）。",
+      "url": "https://www.st.com/resource/en/reference_manual/rm0008-stm32f101xx-stm32f102xx-stm32f103xx-stm32f105xx-and-stm32f107xx-advanced-armbased-32bit-mcus-stmicroelectronics.pdf"
+    }
+  ],
+  "notes": [
+    "signals[].pins 里的数字是 LQFP48 引脚号（1..48），与 pins.json 的 pin 字段对应。",
+    "STM32F103 的复用是\"引脚级\"的：一个引脚同一时刻只能有一个复用功能使能（DS5319 Table 5 注释 4）。界面做分配时应把同一 pin 的第二个外设功能判为冲突；同一外设信号有多个候选引脚时（默认 + 重映射）也应互斥。",
+    "标注 REMAP 的是重映射功能，需要写 AFIO_MAPR（例如 USART1 重映射到 PB6/PB7、I2C1 重映射到 PB8/PB9、CAN 重映射到 PB8/PB9、SPI1 重映射到 PB3/PB4/PB5/PA15）。默认脚与重映射脚不能同时使用。",
+    "ADC1 与 ADC2 的外部通道 0-9 完全共用同一组引脚（PA0-PA7、PB0、PB1），两个 ADC 不能在同一引脚上同时采样。",
+    "本封装（LQFP48）没有 TIM3_ETR 所需的 PD2 引脚 → TIM3 的外部时钟输入在本封装上不可用，因此 TIM3 只列出 CH1-CH4（每条 signal 至少有一个可用引脚，方便前端按引脚做冲突检查）。",
+    "EXTI0-EXTI15：每条线的端口由 AFIO_EXTICR 选择，同号线只能绑定到一个端口（例如 EXTI0 只能选 PA0 或 PB0）。PA13/PA14 默认被 SWJ 占用。",
+    "SWD 与 JTAG 不是\"外设\"但会占用引脚，单独列出以便前端做冲突检查：复位后 SWJ 处于全使能（JTAG + SWD），PA13/PA14/PA15/PB3/PB4 均被占用。"
+  ],
+  "peripherals": [
+    {
+      "id": "USART1",
+      "name": "USART1",
+      "kind": "uart",
+      "signals": [
+        { "signal": "TX", "pins": [30, 42], "note": "默认 PA9（脚 30）；REMAP 到 PB6（脚 42）。二选一。" },
+        { "signal": "RX", "pins": [31, 43], "note": "默认 PA10（脚 31）；REMAP 到 PB7（脚 43）。" },
+        { "signal": "CK", "pins": [29], "note": "PA8（脚 29）。" },
+        { "signal": "CTS", "pins": [32], "note": "PA11（脚 32）。" },
+        { "signal": "RTS", "pins": [33], "note": "PA12（脚 33）。" }
+      ]
+    },
+    {
+      "id": "USART2",
+      "name": "USART2",
+      "kind": "uart",
+      "signals": [
+        { "signal": "TX", "pins": [12], "note": "PA2（脚 12）。" },
+        { "signal": "RX", "pins": [13], "note": "PA3（脚 13）。" },
+        { "signal": "CK", "pins": [14], "note": "PA4（脚 14）。" },
+        { "signal": "CTS", "pins": [10], "note": "PA0（脚 10）。" },
+        { "signal": "RTS", "pins": [11], "note": "PA1（脚 11）。" }
+      ]
+    },
+    {
+      "id": "USART3",
+      "name": "USART3",
+      "kind": "uart",
+      "signals": [
+        { "signal": "TX", "pins": [21], "note": "PB10（脚 21）—— 与 I2C2_SCL 同一引脚，冲突。" },
+        { "signal": "RX", "pins": [22], "note": "PB11（脚 22）—— 与 I2C2_SDA 同一引脚，冲突。" },
+        { "signal": "CK", "pins": [25], "note": "PB12（脚 25）。" },
+        { "signal": "CTS", "pins": [26], "note": "PB13（脚 26）。" },
+        { "signal": "RTS", "pins": [27], "note": "PB14（脚 27）。" }
+      ]
+    },
+    {
+      "id": "I2C1",
+      "name": "I2C1",
+      "kind": "i2c",
+      "signals": [
+        { "signal": "SCL", "pins": [42, 45], "note": "默认 PB6（脚 42）；REMAP 到 PB8（脚 45）。" },
+        { "signal": "SDA", "pins": [43, 46], "note": "默认 PB7（脚 43）；REMAP 到 PB9（脚 46）。" },
+        { "signal": "SMBA", "pins": [41], "note": "PB5（脚 41）。" }
+      ]
+    },
+    {
+      "id": "I2C2",
+      "name": "I2C2",
+      "kind": "i2c",
+      "signals": [
+        { "signal": "SCL", "pins": [21], "note": "PB10（脚 21）—— 与 USART3_TX 同一引脚，冲突。" },
+        { "signal": "SDA", "pins": [22], "note": "PB11（脚 22）—— 与 USART3_RX 同一引脚，冲突。" },
+        { "signal": "SMBA", "pins": [25], "note": "PB12（脚 25）。I2C2 无重映射选项。" }
+      ]
+    },
+    {
+      "id": "SPI1",
+      "name": "SPI1",
+      "kind": "spi",
+      "signals": [
+        { "signal": "SCK", "pins": [15, 39], "note": "默认 PA5（脚 15）；REMAP 到 PB3（脚 39，需关闭 JTAG）。" },
+        { "signal": "MISO", "pins": [16, 40], "note": "默认 PA6（脚 16）；REMAP 到 PB4（脚 40，需关闭 JTAG）。" },
+        { "signal": "MOSI", "pins": [17, 41], "note": "默认 PA7（脚 17）；REMAP 到 PB5（脚 41）。" },
+        { "signal": "NSS", "pins": [14, 38], "note": "默认 PA4（脚 14）；REMAP 到 PA15（脚 38，需关闭 JTAG）。" }
+      ]
+    },
+    {
+      "id": "SPI2",
+      "name": "SPI2",
+      "kind": "spi",
+      "signals": [
+        { "signal": "SCK", "pins": [26], "note": "PB13（脚 26）。" },
+        { "signal": "MISO", "pins": [27], "note": "PB14（脚 27）。" },
+        { "signal": "MOSI", "pins": [28], "note": "PB15（脚 28）。" },
+        { "signal": "NSS", "pins": [25], "note": "PB12（脚 25）。" }
+      ]
+    },
+    {
+      "id": "ADC1",
+      "name": "ADC1",
+      "kind": "adc",
+      "signals": [
+        { "signal": "IN0", "pins": [10], "note": "PA0（脚 10）。" },
+        { "signal": "IN1", "pins": [11], "note": "PA1（脚 11）。" },
+        { "signal": "IN2", "pins": [12], "note": "PA2（脚 12）。" },
+        { "signal": "IN3", "pins": [13], "note": "PA3（脚 13）。" },
+        { "signal": "IN4", "pins": [14], "note": "PA4（脚 14）。" },
+        { "signal": "IN5", "pins": [15], "note": "PA5（脚 15）。" },
+        { "signal": "IN6", "pins": [16], "note": "PA6（脚 16）。" },
+        { "signal": "IN7", "pins": [17], "note": "PA7（脚 17）。" },
+        { "signal": "IN8", "pins": [18], "note": "PB0（脚 18）。" },
+        { "signal": "IN9", "pins": [19], "note": "PB1（脚 19）。" }
+      ]
+    },
+    {
+      "id": "ADC2",
+      "name": "ADC2",
+      "kind": "adc",
+      "signals": [
+        { "signal": "IN0", "pins": [10], "note": "与 ADC1_IN0 同一引脚 PA0（脚 10）。" },
+        { "signal": "IN1", "pins": [11], "note": "与 ADC1_IN1 同一引脚 PA1（脚 11）。" },
+        { "signal": "IN2", "pins": [12], "note": "与 ADC1_IN2 同一引脚 PA2（脚 12）。" },
+        { "signal": "IN3", "pins": [13], "note": "与 ADC1_IN3 同一引脚 PA3（脚 13）。" },
+        { "signal": "IN4", "pins": [14], "note": "与 ADC1_IN4 同一引脚 PA4（脚 14）。" },
+        { "signal": "IN5", "pins": [15], "note": "与 ADC1_IN5 同一引脚 PA5（脚 15）。" },
+        { "signal": "IN6", "pins": [16], "note": "与 ADC1_IN6 同一引脚 PA6（脚 16）。" },
+        { "signal": "IN7", "pins": [17], "note": "与 ADC1_IN7 同一引脚 PA7（脚 17）。" },
+        { "signal": "IN8", "pins": [18], "note": "与 ADC1_IN8 同一引脚 PB0（脚 18）。" },
+        { "signal": "IN9", "pins": [19], "note": "与 ADC1_IN9 同一引脚 PB1（脚 19）。" }
+      ]
+    },
+    {
+      "id": "TIM1",
+      "name": "TIM1（高级定时器）",
+      "kind": "tim",
+      "signals": [
+        { "signal": "CH1", "pins": [29], "note": "PA8（脚 29）。" },
+        { "signal": "CH2", "pins": [30], "note": "PA9（脚 30）。" },
+        { "signal": "CH3", "pins": [31], "note": "PA10（脚 31）。" },
+        { "signal": "CH4", "pins": [32], "note": "PA11（脚 32）。" },
+        { "signal": "CH1N", "pins": [26], "note": "PB13（脚 26）—— 互补输出。" },
+        { "signal": "CH2N", "pins": [27], "note": "PB14（脚 27）—— 互补输出。" },
+        { "signal": "CH3N", "pins": [28], "note": "PB15（脚 28）—— 互补输出。" },
+        { "signal": "BKIN", "pins": [25, 16], "note": "PB12（脚 25）为主；PA6（脚 16）为另一可选（但 PA6 已作 SPI1_MISO/TIM3_CH1，冲突）。" },
+        { "signal": "ETR", "pins": [33], "note": "PA12（脚 33）。" }
+      ]
+    },
+    {
+      "id": "TIM2",
+      "name": "TIM2（通用定时器）",
+      "kind": "tim",
+      "signals": [
+        { "signal": "CH1", "pins": [10, 38], "note": "默认 PA0（脚 10）；REMAP 到 PA15（脚 38，需关闭 JTAG）。" },
+        { "signal": "CH2", "pins": [11, 39], "note": "默认 PA1（脚 11）；REMAP 到 PB3（脚 39，需关闭 JTAG）。" },
+        { "signal": "CH3", "pins": [12, 21], "note": "默认 PA2（脚 12）；REMAP 到 PB10（脚 21，与 I2C2_SCL/USART3_TX 冲突）。" },
+        { "signal": "CH4", "pins": [13, 22], "note": "默认 PA3（脚 13）；REMAP 到 PB11（脚 22，与 I2C2_SDA/USART3_RX 冲突）。" },
+        { "signal": "ETR", "pins": [10, 38], "note": "PA0（脚 10）；REMAP 到 PA15（脚 38）—— 与 CH1 是同一引脚，二选一。" }
+      ]
+    },
+    {
+      "id": "TIM3",
+      "name": "TIM3（通用定时器）",
+      "kind": "tim",
+      "signals": [
+        { "signal": "CH1", "pins": [16, 40], "note": "默认 PA6（脚 16）；部分重映射到 PB4（脚 40，需关闭 JTAG）。" },
+        { "signal": "CH2", "pins": [17, 41], "note": "默认 PA7（脚 17）；部分重映射到 PB5（脚 41）。" },
+        { "signal": "CH3", "pins": [18], "note": "PB0（脚 18）。" },
+        { "signal": "CH4", "pins": [19], "note": "PB1（脚 19）。TIM3_ETR 在 PD2 上，而 LQFP48 封装没有 PD2 → 本封装不提供 TIM3 外部时钟输入，故未列出该 signal。" }
+      ]
+    },
+    {
+      "id": "TIM4",
+      "name": "TIM4（通用定时器）",
+      "kind": "tim",
+      "signals": [
+        { "signal": "CH1", "pins": [42], "note": "PB6（脚 42）。" },
+        { "signal": "CH2", "pins": [43], "note": "PB7（脚 43）。" },
+        { "signal": "CH3", "pins": [45], "note": "PB8（脚 45）。" },
+        { "signal": "CH4", "pins": [46], "note": "PB9（脚 46）。" }
+      ]
+    },
+    {
+      "id": "EXTI",
+      "name": "EXTI（外部中断线 0-15）",
+      "kind": "exti",
+      "signals": [
+        { "signal": "EXTI0", "pins": [10, 18, 5], "note": "PA0 或 PB0 或 PD0，只能选一个（AFIO_EXTICR1）。PD0 是 OSC_IN；仅在不用 HSE 外部晶振时可用（脚 5）。" },
+        { "signal": "EXTI1", "pins": [11, 19, 6], "note": "PA1 或 PB1 或 PD1。PD1 是 OSC_OUT；仅在不用 HSE 外部晶振时可用（脚 6）。" },
+        { "signal": "EXTI2", "pins": [12, 20], "note": "PA2 或 PB2。" },
+        { "signal": "EXTI3", "pins": [13, 39], "note": "PA3 或 PB3（PB3 需关闭 JTAG）。" },
+        { "signal": "EXTI4", "pins": [14, 40], "note": "PA4 或 PB4（PB4 需关闭 JTAG）。" },
+        { "signal": "EXTI5", "pins": [15, 41], "note": "PA5 或 PB5。" },
+        { "signal": "EXTI6", "pins": [16, 42], "note": "PA6 或 PB6。" },
+        { "signal": "EXTI7", "pins": [17, 43], "note": "PA7 或 PB7。" },
+        { "signal": "EXTI8", "pins": [29, 45], "note": "PA8 或 PB8。" },
+        { "signal": "EXTI9", "pins": [30, 46], "note": "PA9 或 PB9。" },
+        { "signal": "EXTI10", "pins": [31, 21], "note": "PA10 或 PB10。" },
+        { "signal": "EXTI11", "pins": [32, 22], "note": "PA11 或 PB11。" },
+        { "signal": "EXTI12", "pins": [33, 25], "note": "PA12 或 PB12。" },
+        { "signal": "EXTI13", "pins": [34, 26, 2], "note": "PA13 / PB13 / PC13 三选一；PA13 默认被 SWD 占用。" },
+        { "signal": "EXTI14", "pins": [37, 27, 3], "note": "PA14 / PB14 / PC14 三选一；PA14 默认被 SWD 占用。" },
+        { "signal": "EXTI15", "pins": [38, 28, 4], "note": "PA15 / PB15 / PC15 三选一；PA15 默认被 JTAG(JTDI) 占用。" }
+      ]
+    },
+    {
+      "id": "CAN",
+      "name": "CAN (bxCAN)",
+      "kind": "can",
+      "signals": [
+        { "signal": "RX", "pins": [32, 45], "note": "默认 PA11（脚 32，与 USB_DM 冲突）；REMAP 到 PB8（脚 45）。" },
+        { "signal": "TX", "pins": [33, 46], "note": "默认 PA12（脚 33，与 USB_DP 冲突）；REMAP 到 PB9（脚 46）。" }
+      ]
+    },
+    {
+      "id": "USB",
+      "name": "USB 2.0 全速设备",
+      "kind": "usb",
+      "signals": [
+        { "signal": "USB_DM", "pins": [32], "note": "PA11（脚 32）—— 与 CAN_RX 冲突。" },
+        { "signal": "USB_DP", "pins": [33], "note": "PA12（脚 33）—— 与 CAN_TX 冲突。" }
+      ]
+    },
+    {
+      "id": "SWD",
+      "name": "SWD 调试口（Serial Wire Debug）",
+      "kind": "debug",
+      "signals": [
+        { "signal": "SWDIO", "pins": [34], "note": "PA13（脚 34），复位后由 SWJ 占用（DS5319 标 FT）。" },
+        { "signal": "SWCLK", "pins": [37], "note": "PA14（脚 37），复位后由 SWJ 占用（DS5319 标 FT）。" }
+      ]
+    },
+    {
+      "id": "JTAG",
+      "name": "JTAG 调试口（复位后默认与 SWD 一起使能）",
+      "kind": "debug",
+      "signals": [
+        { "signal": "JTDI", "pins": [38], "note": "PA15（脚 38）—— 关闭 JTAG 后可作为 SPI1_NSS / TIM2_CH1_ETR。" },
+        { "signal": "JTDO", "pins": [39], "note": "PB3（脚 39）—— 关闭 JTAG 后可作为 SPI1_SCK / TIM2_CH2。" },
+        { "signal": "NJTRST", "pins": [40], "note": "PB4（脚 40）—— 关闭 JTAG 后可作为 SPI1_MISO / TIM3_CH1。" }
+      ]
+    },
+    {
+      "id": "HSE_OSC",
+      "name": "HSE 外部高速晶振（4-16 MHz）",
+      "kind": "pwr",
+      "signals": [
+        { "signal": "OSC_IN", "pins": [5], "note": "脚 5，复位后默认 OSC_IN；不用外部晶振时可重映射为 PD0（DS5319 note 7）。" },
+        { "signal": "OSC_OUT", "pins": [6], "note": "脚 6，复位后默认 OSC_OUT；可重映射为 PD1。" }
+      ]
+    },
+    {
+      "id": "LSE_OSC",
+      "name": "LSE 外部低速晶振（32.768 kHz，供 RTC）",
+      "kind": "pwr",
+      "signals": [
+        { "signal": "OSC32_IN", "pins": [3], "note": "PC14（脚 3）；受 3 mA / 2 MHz 输出限制（DS5319 note 5）。" },
+        { "signal": "OSC32_OUT", "pins": [4], "note": "PC15（脚 4）；同上限制。" }
+      ]
+    }
+  ]
+}

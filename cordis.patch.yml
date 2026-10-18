@@ -1,0 +1,29 @@
+# 单片机工作台：宿主插件行
+#
+# - stm32-workbench  宿主半边：注册 mcu 工具、注册「单片机模式」preset、
+#                   拉起/停止 MCU 后端进程，并在 DSH 同源下开 /mcu/api 代理路由
+#
+# 客户端半边（client.js）由 package.json 的 dsh.client 声明，工作台面板挂在
+# 会话的 conversation.view 插槽上，并由 agentPreset 门控 —— 只在「单片机模式」
+# 的会话里出现，不会挂到每个对话下面。
+- insert:
+    - id: stm32-workbench
+      name: 'dsh-plugin-stm32-workbench'
+      config:
+        # backendDir **故意留空**：
+        #   resolveBackendDir 会自动取「index.js 旁边那份 backend/」，也就是插件自己那一份。
+        #   写死绝对路径会把插件绑死在某一台机器上，而且会让「代码」和「后端」来自两处副本
+        #   （DSH 通过 node_modules 软链加载代码，却从写死的目录 spawn 后端）——
+        #   改了代码忘了同步，就会出现「界面是新的、后端是旧的」，且症状完全不指向原因。
+        #   只在需要指向别处的后端时才填这一项。
+        #
+        # 后端端口（2026-10-18 修正后语义）：
+        #   0（推荐）= 让操作系统分配空闲端口，多实例/DSH 热重启都不会抢端口；
+        #              后端把真实端口打进 `LISTEN http://127.0.0.1:<port>/`，宿主据此认领。
+        #   正数      = 固定端口；启动前宿主会先用 /api/ping 认领同端口的旧后端（DSH 崩溃后的常见状态）。
+        #   以前 index.js 只在 port>0 时把 MCU_AGENT_PORT 传给后端，0 会被后端当成「没配」而退回
+        #   默认 8788 —— 「0 = 系统分配」当时是假的，第二个实例必然 EADDRINUSE。已修。
+        port: 0
+        # DSH 启动期主线程很忙，延后一点再拉起后端（毫秒）。太小不影响正确性，只是把启动竞争挪开。
+        autoStartDelayMs: 1200
+        autoStart: true
