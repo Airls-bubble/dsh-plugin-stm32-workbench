@@ -2,8 +2,9 @@
 
 把 STM32 工作台做成 DSH 插件：**不另开浏览器**，在 DSH 里选工作区 → 会话进入「单片机模式」→ 工作台就在会话视图里。
 
-> **当前版本 0.3.0，适配 DSH 0.2.1-rc.2（2026-10-18）**。mcu 工具 17 个 action（新增
-> `symbols` / `readmem` / `gfx`）。升级适配的根因与修复见文末「适配 DSH 0.2.1」。
+> **当前版本 0.4.0，适配 DSH 0.2.1-rc.2（2026-10-19/20）**。mcu 工具 **18 个 action**
+> （0.3.0 新增 `symbols`/`readmem`/`gfx`，0.4.0 新增 `watch` 并重做为「AI 省 token」形态：
+> status 一次拿全貌、紧凑输出、gfx 基线差异、spec 增量更新）。升级适配的根因与修复见文末。
 
 ## 目录中为什么不是「挂在每个对话下面」
 
@@ -188,8 +189,8 @@ AI 自己跑 `node scripts/*.js` 或手拼 URL —— 同一个逻辑两条路�
 
 ### ① 宿主注册 `mcu` 工具（`index.js`）
 
-一个工具、17 个 action：
-`status/open/scan/files/read/write/build/flash/size/pins/regs/chip/reset/spec/symbols/readmem/gfx`。
+一个工具、18 个 action：
+`status/open/scan/files/read/write/build/flash/size/pins/regs/chip/reset/spec/symbols/readmem/gfx/watch`。
 AI 与界面从此落在**同一套 /api** 上。
 
 2026-10-18 新增三项（对应用户《工具问题记录》第 1/3/13 条）：
@@ -327,8 +328,24 @@ node backend/scripts/keil-verify.js     # 与 Keil 产物逐字节比对（自�
 四个 test 脚本都在**插件自己的工作区**里造沙箱/落产物，不写用户的 Keil 工程；
 `test-src-api.js` 与 `test-features.js` 会快照并还原全局 `recent.json`
 （打开沙箱工程会覆盖「上次打开的工程」，踩过两次）。
-`test-mcu-tool.js` 里 `symbols` 依赖一次成功构建，`readmem`/`gfx`/`chip`/`reset` 依赖实物 ST-Link ——
-没有硬件时这四项会**如实失败**（脚本断言的是「如实」，不是「必须成功」）。
+`test-mcu-tool.js` 里 `symbols` 依赖一次成功构建，`readmem`/`gfx`/`watch`/`chip`/`reset` 依赖实物 ST-Link ——
+没有硬件时这几项会**如实失败**（脚本断言的是「如实」，不是「必须成功」）。
+
+## 0.4.0：为 AI 省 token（2026-10-19/20）
+
+目标是「对 AI 更好用、更易上手，别把 token 浪费在空转上」。做了六件事：
+
+| 改动 | 省掉了什么 |
+| --- | --- |
+| `status` 改为 `/api/keil/overview` 聚合 | 新会话以前要 status→spec→size→chip 四次调用，现在一次拿全（工程/契约/上次构建/工具链） |
+| 工具输出按 action 紧凑渲染（`full:true` 才回原始 JSON） | `size`/`symbols`/`pins`/`regs`/`readmem` 不再把 summary 说过的东西用 JSON 再抄一遍 |
+| `gfx` 默认只回指纹/亮点/基线差异，`mode=ascii` 才拉图，`region` 只看局部 | 查「屏幕变没变」从约 2K token 降到几十 token |
+| `gfx baseline=save|compare` | 「按键后第一行变了没有」这类验证有了一条命令的闭环 |
+| `spec` 支持 `{updates:[…]}` / `{remove:[…]}` 增量写 | 日常只发改动字段，不必整份重述 8~10 个模块 |
+| 读类 action 自动加载最近工程 | 不必为了读一个符号先调一次 `open` |
+
+外加 `watch`：单次 OpenOCD 会话内用 Tcl 循环采样一个变量/寄存器，看「1 ms 节拍在不在跑」「任务周期抖不抖」，
+不必再为每个点重连一次 SWD。
 
 ## 适配 DSH 0.2.1（2026-10-18）
 

@@ -148,6 +148,10 @@ function auditSchema(node, where, problems) {
   console.log('    status  → ' + st.summary);
   check('status: 输出形状合法', shapeOk(st));
   check('status: 已打开工程', st.ok && st.data.open === true);
+  check('status: 一次带回契约/构建/工具链（替代 status+spec+size+chip 四次调用）',
+    st.ok && st.data.spec && st.data.toolchain &&
+    typeof st.data.spec.revision === 'number' && typeof st.data.toolchain.openocd === 'boolean',
+    JSON.stringify(st.data.spec && st.data.spec.revision));
 
   const op = await run({ action: 'open', path: proj });
   console.log('    open    → ' + op.summary.slice(0, 110));
@@ -291,7 +295,7 @@ function auditSchema(node, where, problems) {
   const bBlocks = def.output.render({ action: 'build' }, bd);
   check('render: 结构化结果的 data 也带出去了（bug3 回归）',
     Array.isArray(bBlocks) && bBlocks.length >= 2 &&
-    bBlocks.some((b) => b.type === 'text' && /programSize|errorCount/.test(b.text)),
+    bBlocks.some((b) => b.type === 'text' && /Code=|诊断|Flash/.test(b.text)),
     '块数 ' + (Array.isArray(bBlocks) ? bBlocks.length : 0));
 
   /* spec = 功能契约（用户唯一会读的东西）。
@@ -325,7 +329,7 @@ function auditSchema(node, where, problems) {
     check('chip: 要么给出芯片身份、要么给出真实原因（不装成功）',
       chip.ok
         ? !!(chip.data.chip && (chip.data.chip.deviceId || chip.data.chip.flashKB))
-        : /报错|失败|未检测到|拒绝|Error/i.test(chip.summary),
+        : /报错|失败|未检测到|没找到|拒绝|检查|Error|open failed/i.test(chip.summary),
       chip.summary);
     if (chip.ok && chip.data.chip && chip.data.chip.flashKB) {
       check('chip: summary 里带出 Flash 容量（字段是 flashKB，之前误读成 flashSizeKB）',
@@ -378,22 +382,48 @@ function auditSchema(node, where, problems) {
   }
   covered.push('readmem');
 
-  /* gfx（用户问题记录第 13 条）：显存 → ASCII 图 + PBM。硬件相关：没有 ST-Link 时如实失败。 */
+  /* gfx：默认 info 只回指纹/差异（省 token），要图才 mode=ascii。硬件相关：没 ST-Link 时如实失败。 */
   const gfx = await run({ action: 'gfx' });
   console.log('    gfx     → ' + gfx.summary.slice(0, 130));
   check('gfx: 输出形状合法', shapeOk(gfx));
   if (gfx.ok) {
-    const art = typeof gfx.data.ascii === 'string' ? gfx.data.ascii : String(gfx.data.text || '');
-    check('gfx: 返回 128 列 × 64 行的 ASCII 图',
-      art.split('\n').length === 64 && art.split('\n')[0].length === 128,
-      'lines=' + art.split('\n').length);
-    check('gfx: PBM 文件已落盘', !!(gfx.data.file && require('fs').existsSync(gfx.data.file)), gfx.data.file);
-    check('gfx: 全 0 显存时如实标注 blank', typeof gfx.data.blank === 'boolean', String(gfx.data.blank));
+    check('gfx: 默认不返回整张 ASCII（省 token）', gfx.data.text === undefined || gfx.data.text === '',
+      'text=' + String(gfx.data.text || '').length);
+    check('gfx: 带回 hash 与点亮数', typeof gfx.data.hash === 'string' && typeof gfx.data.litPixels === 'number',
+      'hash=' + gfx.data.hash);
+    const gfxAscii = await run({ action: 'gfx', mode: 'ascii', region: '0,0,127,15' });
+    check('gfx: mode=ascii + region 只画局部', gfxAscii.ok && (() => {
+      const art = String(gfxAscii.data.text || '');
+      return art.split('\n').length === 16 && art.split('\n')[0].length === 128;
+    })(), gfxAscii.summary);
+    const gfxSave = await run({ action: 'gfx', baseline: 'save' });
+    check('gfx: baseline=save 返回基线信息', gfxSave.ok && gfxSave.data.baseline && gfxSave.data.baseline.saved === true,
+      gfxSave.summary);
+    const gfxDiff = await run({ action: 'gfx', baseline: 'compare' });
+    check('gfx: baseline=compare 返回 changedPixels', gfxDiff.ok && gfxDiff.data.diff &&
+      typeof gfxDiff.data.diff.changedPixels === 'number', gfxDiff.summary);
+    const gfxClear = await run({ action: 'gfx', baseline: 'clear' });
+    check('gfx: baseline=clear 成功', gfxClear.ok && gfxClear.data.baseline && gfxClear.data.baseline.cleared === true,
+      gfxClear.summary);
   } else {
     check('gfx: 失败时给出真实原因（不装成功）',
       /失败|报错|拒绝|Error|OpenOCD|没有/i.test(gfx.summary), gfx.summary);
   }
   covered.push('gfx');
+
+  /* watch：单会话采样。硬件相关，只断言「有数据时形状对 / 没数据时如实失败」。 */
+  const wt = await run({ action: 'watch', addr: '0x40021000', samples: 4, intervalMs: 50 });
+  console.log('    watch   → ' + wt.summary.slice(0, 130));
+  check('watch: 输出形状合法', shapeOk(wt));
+  if (wt.ok) {
+    check('watch: 采样次数/统计与样本一致',
+      wt.data.samples === 4 && Array.isArray(wt.data.values) && wt.data.values.length === 4 &&
+      wt.data.min <= wt.data.max, wt.summary);
+  } else {
+    check('watch: 失败时给出真实原因（不装成功）',
+      /失败|报错|拒绝|Error|OpenOCD|没有/i.test(wt.summary), wt.summary);
+  }
+  covered.push('watch');
 
   if (WITH_FLASH) {
     const fls = await run({ action: 'flash' });

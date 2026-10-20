@@ -190,6 +190,56 @@ function formatHexdump(addr, bytes) {
   return lines.join('\n');
 }
 
+/**
+ * 连续采样一个 32 位字（寄存器/变量），**单次 OpenOCD 会话**内完成。
+ *
+ * 为什么不能「readMemory 循环调用」：一次 OpenOCD 从启动到退出要 1.5~2 s，
+ * 想 50 ms 采 20 个点就是 40 s，而且每个点都重连一次 SWD。
+ * 这里把循环放进 OpenOCD 自己的 Tcl：
+ *     for {set i 0} {$i < N} {incr i} { mdw <addr> 1; sleep <ms> }
+ * 一个会话采完。间隔是「mdw 耗时 + sleep」（sleep 精度 ms 级），
+ * 对「1 ms 节拍在不在跑」「任务周期抖不抖」这类定性断言足够；要精确时间戳请用 DWT/SWO。
+ */
+async function watchMemory(addr, opts = {}, onLine = () => {}) {
+  const startAddr = parseAddress(addr);
+  if (startAddr % 4 !== 0) {
+    throw new Error('watch 也走 mdw，地址要 4 字节对齐：0x' + startAddr.toString(16));
+  }
+  const samples = Math.max(2, Math.min(200, Number(opts.samples) || 20));
+  const intervalMs = Math.max(0, Math.min(5000, Number(opts.intervalMs) || 50));
+  const cfg = writeCfg('_watch.cfg', 'adapter speed 1000\ntransport select swd\n');
+  const tcl = 'for {set i 0} {$i < ' + samples + '} {incr i} { mdw 0x' +
+    startAddr.toString(16) + ' 1; sleep ' + intervalMs + ' }';
+  const timeoutMs = Math.max(30000, samples * (intervalMs + 250) + 15000);
+  const started = Date.now();
+  const r = await runOCD(cfg, ['init', tcl, 'exit'], onLine, { timeoutMs });
+  const elapsedMs = Date.now() - started;
+  const values = parseMdw(r.text).map((row) => row.words[0] >>> 0);
+  if (!values.length) {
+    throw new Error('OpenOCD 没有返回采样数据：' + whyFailed(r, '采样失败'));
+  }
+  let min = values[0]; let max = values[0];
+  let changes = 0;
+  for (let i = 0; i < values.length; i += 1) {
+    if (values[i] < min) min = values[i];
+    if (values[i] > max) max = values[i];
+    if (i > 0 && values[i] !== values[i - 1]) changes += 1;
+  }
+  return {
+    ok: true,
+    addr: startAddr,
+    requestedSamples: samples,
+    samples: values.length,
+    intervalMs,
+    elapsedMs,
+    values,
+    min, max, changes,
+    first: values[0],
+    last: values[values.length - 1],
+    timeout: !!r.timeout,
+  };
+}
+
 /** 解析 OpenOCD 报出的芯片信息 */
 function parseChipInfo(text) {
   const info = {};
@@ -361,5 +411,5 @@ async function reset(onLine = () => {}) {
 
 module.exports = {
   probe, flash, flashFile, reset, parseChipInfo, resolveOpenOCD, runOCD, writeCfg,
-  readMemory, formatHexdump, parseMdw, parseAddress,
+  readMemory, formatHexdump, parseMdw, parseAddress, watchMemory,
 };

@@ -255,17 +255,53 @@ function atomicWrite(file, text) {
 }
 
 /**
+ * 增量补丁：只给改动/新增的模块（`updates`）和要删的 id（`remove`），不必每次全量重写。
+ *
+ * 为什么要它（2026-10-19）：全量重写一次 8~10 个模块的 JSON，是几百到上千 token 的**输出**；
+ * 而日常改动往往只动一两句参数/状态。增量把每轮输出压到最小，也不再逼模型复述没变的部分。
+ *
+ * 语义：`updates` = upsert（有就只合并给出的字段，没有就新增，新增至少要 name 或 summary）；
+ *       `remove`  = 按 id 删除。
+ */
+function applyPatch(baseModules, patch) {
+  const byId = new Map();
+  (baseModules || []).forEach((m) => {
+    const n = normalize({ modules: [m] }).modules[0];
+    if (n) byId.set(n.id, n);
+  });
+  (patch.updates || []).forEach((u) => {
+    const id = normId(u && u.id);
+    if (!id) throw new Error('updates 里每一项都要有 id');
+    const old = byId.get(id);
+    if (!old && !(u.name || u.summary)) {
+      throw new Error('updates 里的新模块 "' + id + '" 至少要有 name 或 summary');
+    }
+    byId.set(id, Object.assign({}, old || {}, u, { id }));
+  });
+  (patch.remove || []).forEach((id) => {
+    const key = normId(id);
+    if (!key) throw new Error('remove 里要写模块 id');
+    byId.delete(key);
+  });
+  return Array.from(byId.values());
+}
+
+/**
  * 保存功能描述。
  * 旧内容进 features-history/（保留最近 20 份），所以「改错了」永远能退回去。
  *
  * @param {string} projectDir
- * @param {unknown} input modules 数组或 {modules:[...]}
+ * @param {unknown} input 全量：modules 数组或 {modules:[...]}；增量：{updates:[...], remove:[...]}
  * @param {{by?:string, project?:string}} opts
  */
 function write(projectDir, input, opts) {
   const o = opts || {};
-  const norm = normalize(input);
   const before = read(projectDir);
+  /* 增量补丁先合并到当前清单上，再走原来的全量校验/落盘路径 —— 两条路最终一份真相 */
+  const payload = (input && !Array.isArray(input.modules) && (input.updates || input.remove))
+    ? { modules: applyPatch(before.spec.modules, input) }
+    : input;
+  const norm = normalize(payload);
   const file = featuresPath(projectDir);
 
   // 内容没变就别写：避免「点一次保存就多一份历史、revision 还 +1」
@@ -731,7 +767,7 @@ function buildRefreshMessage(project, stale, spec) {
 module.exports = {
   STATUSES, STATUS_ZH, LIMITS, LIST_FIELDS, FIELD_ZH, FIELD_ORDER, STYLE_RULES,
   featuresPath, historyDir,
-  normalize, read, write, restore, listHistory,
+  normalize, read, write, restore, listHistory, applyPatch,
   listSources, staleness,
   toMarkdown, toOutline,
   diffModules, buildMessage, buildDescribeMessage, buildRefreshMessage,

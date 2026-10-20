@@ -385,12 +385,13 @@ const MOD_B = {
   const def = mod.mcuToolDefinition(() => Promise.resolve({ port: PORT }));
   check('spec 在 action 枚举里', def.parameters.properties.action.enum.indexOf('spec') >= 0);
   check('description 里讲了 spec 怎么用', /spec=/.test(def.description));
-  check('description 要求改完代码必须回写', /必须再调一次 spec/.test(def.description));
+  check('description 说明 spec 何时更新（行为变化才写，不再强制每轮全量）',
+    /只在行为或模块变化时更新/.test(def.description) && /增量/.test(def.description));
   check('description 写清了结构化字段',
     /behavior\[\]/.test(def.description) && /hardware\[\]/.test(def.description) &&
     /params\[\]/.test(def.description) && /limits\[\]/.test(def.description));
   check('description 里带了反废话规矩',
-    /不要废话/.test(def.description) && /不要为了凑格式编内容/.test(def.description));
+    /一行一件事/.test(def.description) && /空话/.test(def.description));
   const signal = new AbortController().signal;
   const run = (args) => def.execute(args, { signal });
 
@@ -454,6 +455,28 @@ const MOD_B = {
     specStale.summary);
   check('spec: 过期信息也进了 data（界面横幅同一份数据）',
     specStale.data.stale && specStale.data.stale.state === 'stale');
+
+  /* ── 增量补丁（2026-10-19）：只发 diff，不全量重述（省输出 token） ── */
+  const patchA = await run({ action: 'spec', content: JSON.stringify({ updates: [{ id: 'tool-a', summary: '补丁改的一句话' }] }) });
+  console.log('    spec(增量) → ' + patchA.summary.slice(0, 120));
+  const afterPatchA = (await api('/api/features')).body.spec;
+  check('spec: 增量补丁只改指定字段',
+    patchA.ok === true && afterPatchA.modules.find((m) => m.id === 'tool-a').summary === '补丁改的一句话',
+    patchA.summary);
+  check('spec: 增量补丁保留其它模块',
+    afterPatchA.modules.length === 2 && !!afterPatchA.modules.find((m) => m.id === 'tool-b'),
+    JSON.stringify(afterPatchA.modules.map((m) => m.id)));
+  const patchRm = await run({ action: 'spec', content: JSON.stringify({ remove: ['tool-b'] }) });
+  check('spec: 增量 remove 删除模块', patchRm.ok === true &&
+    (await api('/api/features')).body.spec.modules.length === 1, patchRm.summary);
+  const patchAdd = await run({ action: 'spec', content: JSON.stringify({ updates: [{ id: 'tool-c', name: '补丁新增', summary: '新模块' }] }) });
+  const afterPatchAdd = (await api('/api/features')).body.spec;
+  check('spec: 增量 updates 可新增模块',
+    patchAdd.ok === true && !!afterPatchAdd.modules.find((m) => m.id === 'tool-c'),
+    patchAdd.summary);
+  const badPatch = await run({ action: 'spec', content: JSON.stringify({ updates: [{ id: 'no-such', foo: 'bar' }] }) });
+  check('spec: 非法补丁（缺 name/summary）如实失败',
+    badPatch.ok === false && /name|summary/.test(badPatch.summary), badPatch.summary);
 
   console.log('\n=== ' + (failures ? failures + ' 项失败' : '全部通过') + ' ===');
 })().catch((err) => {

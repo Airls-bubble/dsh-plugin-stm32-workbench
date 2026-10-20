@@ -94,4 +94,72 @@ function isBlank(bytes) {
   return true;
 }
 
-module.exports = { decodeSsd1306, toAscii, toPbm, writePbm, isBlank, DEFAULT_WIDTH, DEFAULT_HEIGHT };
+/**
+ * 显存内容指纹（sha1 前 12 位）。
+ *
+ * 为什么需要：模型每次看屏幕要 64 行 × 128 字符的 ASCII（约 8 KB、近 2K token），
+ * 而绝大多数检查只是「屏幕变没变 / 和刚才一样吗」。指纹 + 差异包围盒把这类检查
+ * 压到一行输出；只有真要读文字时才拉 ASCII。
+ */
+function hashBytes(bytes) {
+  const crypto = require('node:crypto');
+  const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes || []);
+  return crypto.createHash('sha1').update(buf).digest('hex').slice(0, 12);
+}
+
+/** 只渲染点阵的一个矩形区域（x0,y0,x1,y1，含端点）；用于「只看第一行文字」这类需求 */
+function cropAscii(bitmap, region, opts = {}) {
+  const { width, height, bits } = bitmap;
+  let x0 = 0; let y0 = 0; let x1 = width - 1; let y1 = height - 1;
+  if (Array.isArray(region) && region.length === 4) {
+    x0 = Math.max(0, Math.min(width - 1, Number(region[0]) || 0));
+    y0 = Math.max(0, Math.min(height - 1, Number(region[1]) || 0));
+    x1 = Math.max(x0, Math.min(width - 1, Number(region[2]) || width - 1));
+    y1 = Math.max(y0, Math.min(height - 1, Number(region[3]) || height - 1));
+  }
+  const invert = !!opts.invert;
+  const on = opts.onChar || '#';
+  const off = opts.offChar || '.';
+  const lines = [];
+  for (let y = y0; y <= y1; y++) {
+    let line = '';
+    for (let x = x0; x <= x1; x++) {
+      const bit = bits[y * width + x] ? 1 : 0;
+      line += (invert ? 1 - bit : bit) ? on : off;
+    }
+    lines.push(line);
+  }
+  return { text: lines.join('\n'), x0, y0, x1, y1, width: x1 - x0 + 1, height: y1 - y0 + 1 };
+}
+
+/** 两帧点阵差异：变化像素数 + 变化区域包围盒（无变化返回 null 盒） */
+function diffBitmaps(a, b) {
+  if (!a || !b || a.width !== b.width || a.height !== b.height) {
+    throw new Error('两帧尺寸不一致，不能比较：' +
+      (a && b ? a.width + '×' + a.height + ' vs ' + b.width + '×' + b.height : '缺少一帧'));
+  }
+  let changed = 0;
+  let x0 = Infinity; let y0 = Infinity; let x1 = -1; let y1 = -1;
+  for (let y = 0; y < a.height; y++) {
+    for (let x = 0; x < a.width; x++) {
+      const i = y * a.width + x;
+      if (a.bits[i] !== b.bits[i]) {
+        changed += 1;
+        if (x < x0) x0 = x;
+        if (y < y0) y0 = y;
+        if (x > x1) x1 = x;
+        if (y > y1) y1 = y;
+      }
+    }
+  }
+  return {
+    changedPixels: changed,
+    bbox: changed ? { x0, y0, x1, y1, width: x1 - x0 + 1, height: y1 - y0 + 1 } : null,
+  };
+}
+
+module.exports = {
+  decodeSsd1306, toAscii, toPbm, writePbm, isBlank,
+  hashBytes, cropAscii, diffBitmaps,
+  DEFAULT_WIDTH, DEFAULT_HEIGHT,
+};

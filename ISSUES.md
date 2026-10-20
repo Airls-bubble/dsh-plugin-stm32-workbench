@@ -119,4 +119,30 @@
 5. 回归测试：`test-mcu-tool.js` 新增「write 新建 + 失败输出无损 JSON」断言，验证返回值的每一层都没有
    undefined；`test-src-api.js` 的 BOM/GBK/备份用例全部仍通过。
 
+---
+
+## 2026-10-20：0.4.0「为 AI 省 token / 更好上手」
+
+目标：让模型少调用、少读废话，把每轮开销压到最低。
+
+1. **`status` 变成一次拿全貌**：新增后端 `GET /api/keil/overview`（工程摘要 + 功能契约摘要 +
+   上次构建 + 工具链/串口，全部读文件与缓存，毫秒级）。新会话不再需要 status→spec→size→chip 四次调用。
+2. **工具输出按 action 紧凑渲染**：`size`/`symbols`/`pins`/`regs`/`readmem`/`build`/`files` 等
+   默认只回摘要 + 精选表格；`full:true` 才回原始 JSON。带正文的 action（read/spec/gfx/watch）只回
+   精选元数据，不再把 words/bytes/ascii 抄两遍。
+3. **`gfx` 省 token 形态**：默认只回 `hash`/`litPixels`/`blank`/与基线差异；
+   `mode=ascii` 才拉点阵图；`region="x0,y0,x1,y1"` 只看局部；新增 `baseline=save|compare|clear`
+   （存 `/dsh-mcu/tmp/gfx/baseline.bin`，compare 回变化像素数 + 包围盒）。
+   查「屏幕变没变」从约 2K token 降到几十 token。
+4. **`spec` 增量更新**：`{"updates":[{id,…只写改动字段}]}`（upsert）与 `{"remove":[id]}`，
+   不必每轮全量重述；`features.js` 的 `applyPatch()` 先合并再走原来的校验/落盘/历史。
+   **策略也从「每次 write/build 后必须全量重写」改成「行为/模块变化时才更新」**（persona 与技能同步改）。
+5. **`watch` 新 action**：单次 OpenOCD 会话里用 Tcl 循环采样一个 32 位字（`samples`/`intervalMs`），
+   返回 first/last/min/max/changes + 样本；用于「1 ms 节拍在不在跑」「任务周期抖不抖」。
+6. **读类接口懒加载最近工程**：pins/symbols/gfx/readmem/watch 不再要求先 `open`。
+7. 回归：`test-mcu-tool.js` 与 `test-features.js` 增加对应断言（status 全貌、gfx 默认不吐 ASCII、
+   baseline save/compare/clear、watch、spec 增量），全套通过。硬件相关 action 在未接 ST-Link 时
+   仍按「如实失败」断言。
+
+
 **注意**：修复需要**重启 DSH** 才会加载。

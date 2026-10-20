@@ -78,6 +78,18 @@ function loadRecent() {
   return null;
 }
 
+/**
+ * 读类接口统一懒加载「上次打开的工程」。
+ *
+ * 以前只有 state/size 这么做，pins/symbols 会回 409「先调 open」——
+ * 模型于是要多花一轮 open 才能读一个符号，纯属空转 token。
+ * 读操作按最近工程走是安全的（写操作仍然走各自的显式检查）。
+ */
+function ensureKeil() {
+  if (!currentKeil) currentKeil = loadRecent();
+  return currentKeil;
+}
+
 const SKIP_DIRS = new Set(['Objects', 'Listings', 'DebugConfig', 'node_modules', '.git',
   'build', 'Output', 'RTE', 'DebugConfig', 'Backup', '.vs']);
 
@@ -380,14 +392,14 @@ async function handleApi(req, res, url) {
   }
 
   if (p === '/api/keil/state' && req.method === 'GET') {
-    if (!currentKeil) currentKeil = loadRecent(); // 懒加载：重启后端后自动恢复上次的工程
+    ensureKeil(); // 懒加载：重启后端后自动恢复上次的工程
     if (!currentKeil) { sendJson(res, 200, { ok: true, open: false }); return; }
     sendJson(res, 200, { ok: true, open: true, project: keilSummary(currentKeil.model), openedAt: currentKeil.openedAt });
     return;
   }
 
   if (p === '/api/keil/pins' && req.method === 'GET') {
-    if (!currentKeil) { sendJson(res, 409, { ok: false, error: '还没有打开 Keil 工程（先调 /api/keil/open）' }); return; }
+    if (!ensureKeil()) { sendJson(res, 409, { ok: false, error: '还没有打开 Keil 工程（先调 /api/keil/open）' }); return; }
     try {
       const pinmap = pinmapMod.scanProjectPins(currentKeil.model);
       sendJson(res, 200, Object.assign({ ok: true, project: currentKeil.model.name }, pinmap));
@@ -421,6 +433,7 @@ async function handleApi(req, res, url) {
   if (p === '/api/keil/readmem' && req.method === 'POST') {
     let body = {};
     try { body = await readBody(req); } catch (_) { /* 允许空 body */ }
+    ensureKeil();
     try {
       if (body.addr === undefined || body.addr === null || String(body.addr).trim() === '') {
         throw new Error('需要 addr：十六进制地址（如 0x20000000）或符号名（如 shadow，需要先 build 过）');
@@ -452,16 +465,122 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  /* ───────── 一次调用摸清全貌（为模型省往返）─────────
+   * 新会话要「知道这个工程现在是什么状态」以前要调 4 次：status + spec + size + chip。
+   * 这里全用已有数据拼：当前工程、功能契约摘要、上次构建账本、工具链/板子探测（有缓存）。
+   * 不启动 OpenOCD、不编译 —— 只读文件与缓存，毫秒级。 */
+  if (p === '/api/keil/overview' && req.method === 'GET') {
+    try {
+      const cur = ensureKeil();
+      const env = toolchain.detectEnv();               // 5 s 缓存，通常零成本
+      const armcc = (env.compilers || []).find((c) => c.usable && c.id === 'keil-ac5');
+      const ocdOk = (env.flashers || []).some((f) => f.id === 'openocd' && f.usable);
+      const out = {
+        ok: true,
+        open: !!cur,
+        toolchain: {
+          armcc: armcc ? armcc.path : null,
+          openocd: ocdOk,
+          serialPorts: (env.serialPorts || []).map((s) => s.path),
+        },
+      };
+      if (cur) {
+        out.project = keilSummary(cur.model);
+        out.file = cur.file;
+        out.openedAt = cur.openedAt;
+        try {
+          const f = featuresMod.read(cur.model.dir);
+          const spec = f.spec || { modules: [] };
+          const stale = featuresMod.staleness(cur.model.dir, spec);
+          out.spec = {
+            has: !!f.has, broken: !!f.broken, error: f.error || null,
+            revision: spec.revision || 0, updatedAt: spec.updatedAt || null,
+            stale: stale.state, changedFiles: stale.changedFiles || 0,
+            modules: (spec.modules || []).map((m) => ({
+              id: m.id, name: m.name, status: m.status, summary: m.summary,
+            })),
+          };
+        } catch (err) {
+          out.spec = { has: false, error: String(err.message || err) };
+        }
+        if (!lastKeilBuild) lastKeilBuild = loadLastBuild();
+        if (lastKeilBuild) {
+          const diags = lastKeilBuild.diagnostics || [];
+          out.build = {
+            at: lastKeilBuild.at,
+            programSize: lastKeilBuild.programSize || null,
+            errors: diags.filter((d) => d.level === 'error').length,
+            warnings: diags.filter((d) => d.level === 'warning').length,
+            hex: (lastKeilBuild.artifact && lastKeilBuild.artifact.hex) || null,
+          };
+        }
+      }
+      sendJson(res, 200, out);
+    } catch (err) {
+      sendJson(res, 500, { ok: false, error: String(err.message || err) });
+    }
+    return;
+  }
+
+  /* ───────── 单会话连续采样（看「1 ms 节拍在不在跑」这类时序）───────── */
+  if (p === '/api/keil/watch' && req.method === 'POST') {
+    let body = {};
+    try { body = await readBody(req); } catch (_) { /* 允许空 body */ }
+    ensureKeil();
+    try {
+      if (body.addr === undefined || body.addr === null || String(body.addr).trim() === '') {
+        throw new Error('需要 addr：十六进制地址（如 0x40000024）或符号名（如 shadow）');
+      }
+      let addr = body.addr;
+      let symbol = null;
+      const s = String(addr).trim();
+      const numeric = /^0x[0-9a-f]+$/i.test(s) || /^\d+$/.test(s);
+      if (!numeric) {
+        if (!lastKeilBuild) lastKeilBuild = loadLastBuild();
+        const axf = lastKeilBuild && lastKeilBuild.artifact && lastKeilBuild.artifact.axf;
+        if (!axf) throw new Error('addr 写的是符号名，但还没有构建产物可查符号表 —— 先 build，或直接给十六进制地址');
+        symbol = await symbolsMod.resolveSymbolAddress(axf, s);
+        addr = symbol.addr;
+      }
+      const r = await ocd.watchMemory(addr, {
+        samples: body.samples, intervalMs: body.intervalMs,
+      });
+      sendJson(res, 200, Object.assign({}, r, {
+        addrHex: '0x' + r.addr.toString(16), symbol: symbol || null,
+        note: '单次 OpenOCD 会话内采样；实际间隔 ≈ mdw 耗时 + sleep，用于定性判断（精确计时请用 DWT/SWO）',
+      }));
+    } catch (err) {
+      sendJson(res, 500, { ok: false, error: String(err.message || err) });
+    }
+    return;
+  }
+
   /* ───────── 屏幕显存 → ASCII / PBM（用户问题记录第 13 条）─────────
    * SSD1306 的 I2C 读不可靠，看不到「屏幕上到底画了什么」。这里用 readmem 读显存、
-   * 按页格式解成 128×64 点阵：给模型一张 ASCII 图，同时落一份标准 PBM 文件给用户看。 */
+   * 按页格式解成点阵。
+   *
+   * 2026-10-19 为「省 token」重做：默认只回**指纹 + 点亮数 + 与基线的差异**（一行输出），
+   * 只有明确要 `mode=ascii` 时才拉 ASCII；`region` 可以只画一行；`baseline` 可以
+   * 存/比一帧基准 —— 「按键后第一行变了没有」这类验证从 2K token 降到几十 token。 */
   if (p === '/api/keil/gfx' && req.method === 'POST') {
     let body = {};
     try { body = await readBody(req); } catch (_) { /* 允许空 body */ }
+    ensureKeil();
     try {
       const width = Math.max(8, Math.min(256, Number(body.width) || gfxMod.DEFAULT_WIDTH));
       const height = Math.max(8, Math.min(128, Number(body.height) || gfxMod.DEFAULT_HEIGHT));
       const invert = body.invert === true;
+      const mode = body.mode === 'ascii' || body.mode === 'both' ? body.mode : 'info';
+      const baselineOp = ['save', 'compare', 'clear'].indexOf(String(body.baseline || '')) >= 0
+        ? String(body.baseline) : null;
+      let region = null;
+      if (Array.isArray(body.region) && body.region.length === 4) region = body.region.map(Number);
+      else if (typeof body.region === 'string' && body.region.trim()) {
+        region = body.region.split(',').map((x) => Number(x.trim()));
+        if (region.length !== 4 || region.some((n) => !Number.isFinite(n))) {
+          throw new Error('region 要写 "x0,y0,x1,y1"（如 "0,0,127,15" 只看第一行）');
+        }
+      }
       let addr = body.addr;
       let symbol = null;
       const s = addr === undefined || addr === null ? '' : String(addr).trim();
@@ -493,18 +612,55 @@ async function handleApi(req, res, url) {
       const r = await ocd.readMemory(addr, need);
       if (r.length < need) throw new Error('读到的字节数不足：需要 ' + need + ' B，只拿到 ' + r.length + ' B');
       const bitmap = gfxMod.decodeSsd1306(r.bytes, width, height);
-      const ascii = gfxMod.toAscii(bitmap, { invert });
       const blank = gfxMod.isBlank(r.bytes);
       const litPixels = bitmap.bits.reduce((a, b) => a + b, 0);
-      /* PBM 落在工程自己的 .dsh-mcu/tmp/gfx 下（用户能直接打开看）；没打开工程时退回系统临时目录 */
-      const outDir = currentKeil && currentKeil.model && currentKeil.model.dir
+      const hash = gfxMod.hashBytes(r.bytes);
+
+      /* 基线：一帧「基准画面」，用来回答「屏幕变了没有 / 变在哪一块」 */
+      const outDir = (currentKeil && currentKeil.model && currentKeil.model.dir)
         ? paths.tmpDir(currentKeil.model.dir, 'gfx')
         : paths.transientDir();
-      const file = gfxMod.writePbm(bitmap, outDir, { invert });
+      const baseFile = path.join(outDir, 'baseline.bin');
+      const baseMetaFile = path.join(outDir, 'baseline.json');
+      let baseInfo = null;
+      let diff = null;
+      if (baselineOp === 'save') {
+        fs.writeFileSync(baseFile, Buffer.from(r.bytes));
+        baseInfo = { saved: true, at: new Date().toISOString(), hash, addr: r.addr, width, height, invert };
+        fs.writeFileSync(baseMetaFile, JSON.stringify(baseInfo, null, 2), 'utf8');
+      } else if (baselineOp === 'clear') {
+        try { fs.unlinkSync(baseFile); } catch (_) { /* 本来就没有 */ }
+        try { fs.unlinkSync(baseMetaFile); } catch (_) { /* 本来就没有 */ }
+        baseInfo = { cleared: true };
+      } else if (baselineOp === 'compare' || fs.existsSync(baseFile)) {
+        if (!fs.existsSync(baseFile)) {
+          if (baselineOp === 'compare') throw new Error('还没有保存过基线 —— 先 gfx baseline=save 存一帧');
+        } else {
+          const prev = gfxMod.decodeSsd1306(fs.readFileSync(baseFile), width, height);
+          diff = gfxMod.diffBitmaps(prev, bitmap);
+          try { baseInfo = Object.assign({ compare: true }, JSON.parse(fs.readFileSync(baseMetaFile, 'utf8'))); }
+          catch (_) { baseInfo = { compare: true }; }
+        }
+      }
+
+      let ascii = null;
+      let asciiRegion = null;
+      if (mode === 'ascii' || mode === 'both') {
+        const crop = gfxMod.cropAscii(bitmap, region, { invert });
+        ascii = crop.text;
+        asciiRegion = { x0: crop.x0, y0: crop.y0, x1: crop.x1, y1: crop.y1, width: crop.width, height: crop.height };
+      }
+      let file = null;
+      if (mode === 'ascii' || mode === 'both' || baselineOp === 'save') {
+        file = gfxMod.writePbm(bitmap, outDir, { invert });
+      }
       sendJson(res, 200, {
         ok: true, addr: r.addr, addrHex: '0x' + r.addr.toString(16), symbol: symbol || null,
-        width, height, invert, bytes: need, litPixels, blank, file, ascii,
-        note: blank ? '显存全 0：屏幕可能是灭的，或固件没在跑（这不是 gfx 失败）' : '',
+        width, height, invert, mode, bytes: need, litPixels, blank, hash,
+        baseline: baseInfo, diff,
+        ascii, asciiRegion, file,
+        note: blank ? '显存全 0：屏幕可能是灭的，或固件没在跑（这不是 gfx 失败）'
+          : 'diff.changedPixels=0 表示和基线一模一样；bbox 是变化区域',
       });
     } catch (err) {
       sendJson(res, 500, { ok: false, error: String(err.message || err) });
@@ -593,6 +749,7 @@ async function handleApi(req, res, url) {
    * 「想知道 shadow / reqPage 在 RAM 里的地址，只能读链接器段列表自己推」。
    * 现在直接解析构建出来的 .axf：符号名 → 地址/大小，filter 支持子串匹配。 */
   if (p === '/api/keil/symbols' && req.method === 'GET') {
+    ensureKeil();
     if (!lastKeilBuild) lastKeilBuild = loadLastBuild();
     const axf = lastKeilBuild && lastKeilBuild.artifact && lastKeilBuild.artifact.axf;
     if (!axf) {
@@ -808,7 +965,7 @@ async function handleApi(req, res, url) {
     try {
       const body = await readBody(req);
       const ctx = featureContext();
-      const r = featuresMod.write(ctx.dir, { modules: body.modules }, {
+      const r = featuresMod.write(ctx.dir, body, {
         by: body.by === 'ai' ? 'ai' : 'user', project: ctx.name,
       });
       sendJson(res, 200, Object.assign(featurePayload(ctx, true), {

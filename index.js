@@ -113,7 +113,7 @@ const TOOL_NAME = 'mcu';
 const TOOL_ACTIONS = [
   'status', 'open', 'scan', 'files', 'read', 'write',
   'build', 'flash', 'size', 'pins', 'regs', 'chip', 'reset', 'spec',
-  'symbols', 'readmem', 'gfx',
+  'symbols', 'readmem', 'gfx', 'watch',
 ];
 
 /**
@@ -128,51 +128,25 @@ const TOOL_ACTIONS = [
 const DEFAULT_READ_LINES = 400;
 
 const TOOL_DESCRIPTION = [
-  'STM32F103 工作台（Keil 工程 + ST-Link/OpenOCD）。',
-  '用这条**已经验证过**的后端路径驱动开发闭环，不要再用 node 脚本或手工拼 HTTP 去绕过它。',
-  'action 取值：',
-  'status=看当前打开的工程；',
-  'open=打开工程（path 给 .uvprojx 或它所在目录）；',
-  'scan=扫一个目录里有哪些工程（dir）；',
-  'files=列出工程源文件与各自编码；',
-  'read=读源码（path 用工程里的相对路径原文，例如 .\\User\\main.c；' +
-  '默认只给前 ' + DEFAULT_READ_LINES + ' 行，大文件用 offset/limit 分段读）；',
-  'write=写源码（path + content，可选 expectMtime/encoding）——已有文件按原编码写回、写前自动备份；' +
-  '文件不存在时按 encoding 新建（默认含中文用 UTF-8 BOM，保证 armcc 不乱码）；',
-  'build=编译，返回结构化 diagnostics（文件/行号/错误码/原文）；构建目录会留下 .axf/.hex/.bin 与完整 Project.map；',
-  'flash=烧录上次构建的产物（verify 默认 true）。末尾 OpenOCD 执行 reset exit：**烧完芯片自动开始运行**，不是停在复位状态；',
-  'size=Flash/SRAM 占用与按文件、按函数的体积排行；',
-  'pins=引脚配置静态分析并与芯片实际配置对照；',
-  'regs=经 SWD 直读寄存器与时钟；',
-  'chip=探测 ST-Link 与芯片是否连通；',
-  'reset=复位目标芯片；',
-  'symbols=读构建产物 .axf 的符号表（filter 子串过滤，如 filter=reqDirty）——变量/函数的地址与大小，别再靠段偏移硬推；',
-  'readmem=读目标内存：addr 写十六进制地址（0x20000000）或符号名（如 shadow），length 字节数（默认 64，上限 4096）。' +
-  '**不 halt**，读完即退出、目标保持原运行状态；mdw 只支持 32 位字，所以地址要 4 字节对齐，' +
-  '64 位读（mdd）OpenOCD 不支持，请用两次 mdw；',
-  'gfx=把 SSD1306 显存（默认 128×64 = 1024 B）解成屏幕点阵：返回 ASCII 图、落一份 PBM 文件。' +
-  'addr 不写时自动找 shadow/fb/buffer 之类显存符号；invert=true 用于反色面板。显存全 0 会如实说「屏幕可能是灭的」，不假装是图；',
-  'spec=**功能契约**：读/写「这块板子现在能干什么」的**结构化自然语言**描述（用户看的是它，不是代码）。' +
-  '不带 content 就是读；带 content 就是写。content 给 JSON，**每个模块固定这些字段**：' +
-  'id（稳定短标识）、name（功能名，不是文件名）、status（done/partial/todo/broken）、' +
-  'summary（一句话，≤40 字）、trigger（何时发生：上电时/每 1 秒/按下 PB1 时）、' +
-  'behavior[]（能看到什么：屏幕显示什么、灯怎么变、串口吐什么）、' +
-  'hardware[]（引脚与外设，如 "PB1 — 按键 K1，上拉输入，按下为低"）、' +
-  'params[]（关键数值带单位，如 "自动翻页 5 s"）、limits[]（限制与已知问题）、files[]（工程内相对路径）。' +
-  '例：{"modules":[{"id":"pages","name":"五页仪表盘","status":"done",' +
-  '"summary":"屏幕 5 页，5 秒自动翻页，也可按键翻页","trigger":"上电即开始；停满 5 秒自动翻页",' +
-  '"behavior":["第 1 行显示 P1/5 OVERVIEW"],"hardware":["PB8 — OLED SCL"],' +
-  '"params":["自动翻页间隔 5 秒"],"limits":["趋势图最左列是最新的一秒"],"files":[".\\\\User\\\\UI.c"]}]}。' +
-  '**行文规矩（用户明确要求过：不要废话）**：一行一件事、每条 ≤40 字；只写能被观察到的现象，' +
-  '不写实现（「用 DWT 计数器统计」不算现象）；禁止「该模块主要用于」「通过调用…实现」这类空话；' +
-  '正文里不写函数名与文件路径；想不到的字段留空，**不要为了凑格式编内容**。' +
-  '**每次写源码（write）或构建（build）之后，必须再调一次 spec 把描述更新成与代码一致** —— ' +
-  '这是用户唯一会读的东西，写旧了等于没写。',
-  '返回里 summary 是给人看的一行，data 是原始结构。失败时 ok=false 且 summary 说明原因。',
-  '**链接器区域符号语义（别混，用户问题记录第 5 条）**：' +
-  'Image$$ER_IROM1$$Length = Code+RO；Image$$RW_IRAM1$$Length 只含 .data（不含 .bss），' +
-  '.bss 要用 Image$$RW_IRAM1$$ZI$$Length；没有 ER_IROM1$$ZI 这种写法（试过 4 种都 L6218E）。' +
-  'build 报的 flashBytes 含 RW 初值在 Flash 里的副本，所以比 ER_IROM1$$Length 大，两个数不是一回事。',
+  'STM32F103 工作台（Keil AC5 + ST-Link/OpenOCD）。',
+  '**先 status 一次拿到工程/契约/构建/工具链全貌，再动手**（不要 status→spec→size→chip 连调四次）。',
+  'action：status=全貌；open/scan=选工程；files/read/write=源码（write 按原编码、可新建）；',
+  'build=编译（返回结构化诊断，产物带 map）；flash=烧上次构建（烧完自动运行）；size=占用排行；',
+  'pins=引脚；regs=寄存器/时钟；chip=探测芯片；reset=复位；',
+  'open=打开工程（path 给 .uvprojx 或目录）；scan=扫目录里的工程（dir）；files=源文件与编码；',
+  'read=读源码（path 用工程内相对路径，如 .\\User\\main.c；默认前 ' + DEFAULT_READ_LINES + ' 行，大文件用 offset/limit）；',
+  'write=写源码（path + content，可选 expectMtime/encoding）——已有文件按原编码写回并备份，文件不存在按 encoding 新建；',
+  'symbols=读构建产物 .axf 的符号表（filter 子串过滤）——变量/函数的地址与大小；',
+  'readmem=读目标内存：addr 写十六进制地址或符号名，length 字节数（默认 64，上限 4096）；**不 halt**；',
+  'gfx=看屏幕：默认只回 hash/点亮数/与基线差异（省 token）；mode=ascii 才拉图，region="0,0,127,15" 只看局部；' +
+  'baseline=save|compare 做「屏幕变没变/变在哪」验证；addr 不写时自动找 shadow/fb 之类显存符号；',
+  'watch=采样一个变量/寄存器（addr 可写符号名，samples/intervalMs），看节拍/周期类时序；',
+  'spec=**功能契约**（人读的描述）。不带 content 读；带 content 写。写有两种：' +
+  '全量 {"modules":[…]}（首次描述用）；**日常只用增量** {"updates":[{"id":"x", …只写要改的字段}]} 或 {"remove":["y"]}。' +
+  '字段：id/name/status(done|partial|todo|broken)/summary(≤40字)/trigger/behavior[]/hardware[]/params[]/limits[]/files[]。' +
+  '**只在行为或模块变化时更新**，没变就别写；用户改过的描述就是需求，照它改代码。',
+  '行文：一行一件事、只写可观察现象、每条 ≤40 字；不写实现细节与空话。',
+  '返回里 summary 是给人看的一行；默认还附紧凑表格，`full:true` 才回原始 JSON。失败时 ok=false 且 summary 说明原因。',
 ].join('');
 
 const TOOL_PARAMETERS = {
@@ -193,7 +167,7 @@ const TOOL_PARAMETERS = {
     content: {
       type: 'string',
       description: 'write 用：写进文件的完整文本。' +
-        'spec 用：功能描述的 JSON（{"modules":[…]} 或直接一个数组；给了就是写，不给就是读）。',
+        'spec 用：功能描述 JSON。全量 {"modules":[…]}；增量 {"updates":[{id,…}]} 或 {"remove":[id]}（推荐日常用）。',
     },
     offset: { type: 'number', description: 'read 用：起始行号，从 1 开始。缺省 1。' },
     limit: { type: 'number', description: 'read 用：最多读几行，缺省 ' + DEFAULT_READ_LINES + '，上限 2000。' },
@@ -210,6 +184,20 @@ const TOOL_PARAMETERS = {
       description: 'readmem 用：读取字节数，默认 64，上限 4096；内部按 4 字节字读，不足 4 的倍数会向上取整后截回。',
     },
     invert: { type: 'boolean', description: 'gfx 用：面板是反色（bit=0 才点亮）时传 true。默认 false。' },
+    mode: {
+      type: 'string',
+      enum: ['info', 'ascii', 'both'],
+      description: 'gfx 用：info（默认，只回 hash/亮点/基线差异，省 token）| ascii（拉点阵图）| both。',
+    },
+    region: { type: 'string', description: 'gfx 用："x0,y0,x1,y1"（含端点），只画这个区域，如 "0,0,127,15" 只看第一行。' },
+    baseline: {
+      type: 'string',
+      enum: ['save', 'compare', 'clear'],
+      description: 'gfx 用：save 把当前屏存为基线；compare 与基线比（回 changedPixels + 变化包围盒）；clear 清除。',
+    },
+    samples: { type: 'number', description: 'watch 用：采样次数，默认 20，上限 200。' },
+    intervalMs: { type: 'number', description: 'watch 用：每个采样点之间的 sleep，默认 50 ms（实际间隔还要加 SWD 读耗时）。' },
+    full: { type: 'boolean', description: '所有 action 用：true 时返回完整原始 JSON（默认是紧凑表格，省 token）。' },
     encoding: {
       type: 'string',
       enum: ['utf8', 'utf8-bom', 'gbk', 'ascii'],
@@ -291,45 +279,180 @@ function safeJson(v) {
 
 /**
  * 把工具结果渲染成模型能读到的内容块。
- *   · summary 永远是第一块；
- *   · data 跟上，让 description 的承诺兑现；
- *   · 源码正文（data.text）**单独成块** —— 混进 JSON 会被转义得没法读，还容易被截断毁掉。
+ *
+ * 2026-10-19「省 token」重做：以前所有 action 都把整份 data 用 JSON 再吐一遍，
+ * 于是 `size`/`symbols`/`pins`/`regs`/`readmem` 的返回里大量字段是 summary 已经说过的，
+ * 每轮白烧几千 token，还更容易触发 DSH 的结果裁剪。现在：
+ *   · 默认按 action 输出**紧凑表格/清单**；
+ *   · `full:true` 才回原始 JSON（排查时才用）；
+ *   · 带正文的结果（read/spec/readmem/gfx/watch）只回精选元数据 + 正文。
  */
-function renderToolResult(value) {
+function renderToolResult(value, args) {
   const summary = String((value && value.summary) || '（无输出）');
   const blocks = [{ type: 'text', text: summary }];
   const data = value && value.data;
   if (!data || typeof data !== 'object' || Object.keys(data).length === 0) return blocks;
+  const action = String((value && value.action) || '');
 
   if (typeof data.text === 'string') {
-    const meta = Object.assign({}, data);
-    delete meta.text;
+    const meta = pickMeta(action, data);
     let metaText = safeJson(meta);
-    if (metaText.length > RENDER_TEXT_LIMIT) {
-      metaText = metaText.slice(0, RENDER_TEXT_LIMIT) +
-        '\n…（元数据已截断：完整 ' + metaText.length + ' 字符）';
-    }
+    if (metaText.length > 1500) metaText = metaText.slice(0, 1500) + '…（元数据已截断）';
     blocks.push({ type: 'text', text: '元数据：' + metaText });
     blocks.push({
       type: 'text',
-      text: '----- ' + (data.rel || '源码') + '（' + (data.encoding || '?') + '，共 ' +
-        (data.lines === undefined || data.lines === null ? '?' : data.lines) +
-        (data.linesUnit || ' 行') + '）正文 -----\n' + data.text,
+      text: '----- ' + (data.rel || '正文') + ' -----\n' + data.text,
     });
     return blocks;
   }
 
-  /* 紧凑 JSON：indent 会让体积翻倍，而体积直接关系到「会不会被裁剪器盯上」 */
-  let body = JSON.stringify(data);
-  if (body === undefined) body = String(data);
-  if (body.length > RENDER_TEXT_LIMIT) {
-    const full = body.length;
-    body = body.slice(0, RENDER_TEXT_LIMIT) +
-      '\n…（data 过长已截断：完整 ' + full + ' 字符，上面是前 ' + RENDER_TEXT_LIMIT + ' 字符）';
+  /* full:true → 原始 JSON（保底排查用） */
+  if (args && args.full === true) {
+    let body = JSON.stringify(data);
+    if (body.length > RENDER_TEXT_LIMIT) body = body.slice(0, RENDER_TEXT_LIMIT) + '…（已截断）';
+    blocks.push({ type: 'text', text: body });
+    return blocks;
   }
+
+  const lines = compactLines(action, data);
+  if (lines.length) {
+    let text = lines.join('\n');
+    if (text.length > RENDER_TEXT_LIMIT) text = text.slice(0, RENDER_TEXT_LIMIT) + '\n…（已截断，full:true 看原始结构）';
+    blocks.push({ type: 'text', text });
+    return blocks;
+  }
+
+  let body = JSON.stringify(data);
+  if (body.length > RENDER_TEXT_LIMIT) body = body.slice(0, RENDER_TEXT_LIMIT) + '…（已截断）';
   blocks.push({ type: 'text', text: body });
   return blocks;
 }
+
+/** 带正文的结果只回必要元数据（避免 words/bytes/ascii 再抄一遍） */
+function pickMeta(action, data) {
+  const pick = (keys) => {
+    const out = {};
+    keys.forEach((k) => { if (data[k] !== undefined) out[k] = data[k]; });
+    return out;
+  };
+  if (action === 'read') return pick(['rel', 'encoding', 'bytes', 'lines', 'truncated', 'mtime', 'offset']);
+  if (action === 'spec') return pick(['has', 'broken', 'error', 'revision', 'updatedAt', 'stale', 'project']);
+  if (action === 'readmem') return pick(['addr', 'length', 'symbol', 'hex']);
+  if (action === 'gfx') return pick(['addr', 'width', 'height', 'hash', 'litPixels', 'blank', 'diff', 'baseline', 'file']);
+  if (action === 'watch') return pick(['addr', 'symbol', 'samples', 'intervalMs', 'elapsedMs', 'min', 'max', 'changes', 'first', 'last']);
+  return pick(Object.keys(data).filter((k) => typeof data[k] !== 'object'));
+}
+
+function hex12(n) { return '0x' + (Number(n) >>> 0).toString(16).padStart(8, '0'); }
+
+/** 每个 action 的紧凑展示（省 token 的主体） */
+function compactLines(action, data) {
+  const lines = [];
+  const add = (s) => { if (s !== undefined && s !== null && String(s) !== '') lines.push(String(s)); };
+  if (action === 'status') {
+    if (data.project) {
+      const p = data.project;
+      add(p.name + ' · ' + p.device + ' · ' + p.core + ' · ' + p.optimFlag + ' · ' + p.sourceCount + ' 源文件');
+    }
+    if (data.spec) {
+      const sp = data.spec;
+      add('契约：' + (sp.has ? (sp.modules.length + ' 模块 r' + sp.revision + (sp.stale === 'stale' ? ' ⚠过期(' + sp.changedFiles + ' 文件被改)' : ' 同步')) : '还没有功能描述'));
+      if (sp.modules && sp.modules.length) {
+        add('模块：' + sp.modules.slice(0, 12).map((m) => m.id + '/' + m.status).join(' ') + (sp.modules.length > 12 ? ' …' : ''));
+      }
+    }
+    if (data.build) {
+      const b = data.build; const s = b.programSize || {};
+      add('构建：Flash ' + s.flashBytes + ' B，SRAM ' + s.ramBytes + ' B，' + b.errors + ' 错 ' + b.warnings + ' 警告（' + (b.at ? new Date(b.at).toLocaleString() : '?') + '）');
+    }
+    if (data.toolchain) add('工具链：armcc ' + (data.toolchain.armcc ? '✓' : '✗') + ' · OpenOCD ' + (data.toolchain.openocd ? '✓' : '✗') + ' · 串口 ' + (data.toolchain.serialPorts.length || '无'));
+    return lines;
+  }
+  if (action === 'symbols') {
+    const rows = Array.isArray(data.symbols) ? data.symbols : [];
+    add('共 ' + data.total + ' 个，匹配 ' + data.matched + (data.omitted ? '（省略 ' + data.omitted + '，缩小 filter 或加大 limit）' : ''));
+    rows.slice(0, 40).forEach((s) => add(s.name + '  ' + s.addr + '  ' + (s.size ? s.size + ' B' : '-') + '  ' + s.type));
+    return lines;
+  }
+  if (action === 'pins') {
+    const pins = Array.isArray(data.pins) ? data.pins : [];
+    add('引脚 ' + pins.length + ' 个，冲突 ' + ((data.conflicts || []).length) + '，重配 ' + ((data.reconfigs || []).length));
+    pins.slice(0, 30).forEach((p) => add(Object.entries(p).filter(([, v]) => v !== undefined && v !== null && v !== '')
+      .map(([k, v]) => k + '=' + (typeof v === 'object' ? JSON.stringify(v) : v)).join(' ')));
+    return lines;
+  }
+  if (action === 'regs') {
+    if (data.clock) add('SYSCLK ' + (data.clock.sysclkHz / 1e6).toFixed(1) + ' MHz ' + (data.clock.source || ''));
+    if (data.compare) add('与源码对照：一致 ' + (data.compare.matched || 0) + '，差异 ' + ((data.compare.differences || []).length) + '，缺失 ' + ((data.compare.missing || []).length));
+    return lines;
+  }
+  if (action === 'size') {
+    const s = data.programSize || {};
+    add('Flash ' + s.flashBytes + ' B（' + ((s.flashBytes / ((s.flashKB || 64) * 1024)) * 100).toFixed(1) + '%） · SRAM ' + s.ramBytes + ' B（' + ((s.ramBytes / ((s.ramKB || 20) * 1024)) * 100).toFixed(1) + '%）');
+    const uo = Array.isArray(data.userObjects) ? data.userObjects : [];
+    if (uo.length) {
+      add('最大文件：' + uo.slice(0, 5).map((o) => o.name + ' ' + o.flash + 'B').join(' · '));
+    }
+    const fn = Array.isArray(data.functions) ? data.functions : [];
+    if (fn.length) add('最大函数：' + fn.slice(0, 5).map((f) => f.name + ' ' + f.flash + 'B').join(' · '));
+    return lines;
+  }
+  if (action === 'build') {
+    const s = data.programSize;
+    if (s) add('Code=' + s.code + ' RO=' + s.rodata + ' RW=' + s.rwdata + ' ZI=' + s.zidata + ' · Flash ' + s.flashBytes + '/' + (s.flashKB || 64) + ' KB');
+    const diags = Array.isArray(data.diagnostics) ? data.diagnostics : [];
+    const errs = diags.filter((d) => d.level === 'error');
+    const warns = diags.filter((d) => d.level === 'warning');
+    add('诊断：' + errs.length + ' 错 / ' + warns.length + ' 警告' + (data.artifact ? '；产物已生成' : ''));
+    errs.slice(0, 6).forEach((d) => add('E ' + (d.file || '?') + ':' + (d.line || '?') + ' ' + (d.code || '') + ' ' + String(d.message || '').slice(0, 120)));
+    warns.slice(0, 2).forEach((d) => add('W ' + (d.file || '?') + ':' + (d.line || '?') + ' ' + String(d.message || '').slice(0, 100)));
+    if (data.logTail && data.logTail.length && errs.length) {
+      add('日志尾部：'); data.logTail.slice(-6).forEach((l) => add('  ' + String(l).slice(0, 160)));
+    }
+    return lines;
+  }
+  if (action === 'readmem') {
+    add(data.addr + '  ' + data.length + ' B' + (data.symbol ? '（' + data.symbol.name + '）' : ''));
+    add('hex: ' + data.hex);
+    return lines;
+  }
+  if (action === 'gfx') {
+    add((data.width || 128) + '×' + (data.height || 64) + ' @ ' + data.addr + ' · hash ' + data.hash + ' · ' + (data.blank ? '全 0（屏幕灭/固件没跑？）' : '点亮 ' + data.litPixels + ' 像素'));
+    if (data.diff) {
+      add(data.diff.changedPixels ? ('与基线差异 ' + data.diff.changedPixels + ' 像素，区域 ' +
+        data.diff.bbox.x0 + ',' + data.diff.bbox.y0 + ' → ' + data.diff.bbox.x1 + ',' + data.diff.bbox.y1)
+        : '与基线完全一致');
+    }
+    if (data.baseline && data.baseline.saved) add('基线已保存 ' + data.baseline.at);
+    if (data.baseline && data.baseline.cleared) add('基线已清除');
+    if (data.ascii) add('ASCII ' + data.asciiRegion.width + '×' + data.asciiRegion.height + '（mode=ascii 时才输出，已省略）');
+    return lines;
+  }
+  if (action === 'watch') {
+    add('采样 ' + data.samples + ' 次 @ ' + data.addr + '：first=' + hex12(data.first) + ' last=' + hex12(data.last) +
+      ' min=' + hex12(data.min) + ' max=' + hex12(data.max) + ' changes=' + data.changes +
+      '（' + data.elapsedMs + ' ms，约 ' + Math.round(data.elapsedMs / data.samples) + ' ms/点）');
+    add('值：' + (data.values || []).map(hex12).join(' '));
+    return lines;
+  }
+  if (action === 'files') {
+    const files = Array.isArray(data.files) ? data.files : [];
+    add('共 ' + data.count + ' 个（GBK ' + (data.gbkCount || 0) + '，缺失 ' + ((data.missing || []).length) + '）');
+    files.slice(0, 25).forEach((f) => add((f.rel || f.path) + '  ' + f.encoding + (f.exists === false ? '  [缺失]' : '')));
+    return lines;
+  }
+  if (action === 'open') {
+    if (data.project) add(data.project.name + ' · ' + data.project.device + ' · ' + data.project.summary);
+    (data.diagnostics || []).slice(0, 5).forEach((d) => add('· ' + d.level + ': ' + String(d.message || '').slice(0, 140)));
+    return lines;
+  }
+  if (action === 'scan') {
+    (data.projects || []).slice(0, 20).forEach((p) => add((p.name || p.file) + '  ' + (p.device || '')));
+    return lines;
+  }
+  return [];
+}
+
 
 /**
  * 构造 mcu 工具定义。
@@ -406,7 +529,7 @@ export function mcuToolDefinition(ensureBackend) {
          以前这里只吐一行 summary，等于把 data 整个丢掉 —— 工具在 description 里承诺
          「data 是原始结构」，模型却永远看不到：`read` 读不回源码正文、`build` 的结构化
          诊断也拿不到。（2026-10-14 报告确认，这个坑实际踩到过一次。） */
-      render: (_args, value) => renderToolResult(value),
+      render: (args, value) => renderToolResult(value, args),
     },
     /* 构建 41 个文件要 5 秒左右，烧录还要加上擦写 Flash 的时间 */
     timeoutMs: 600000,
@@ -426,14 +549,42 @@ export function mcuToolDefinition(ensureBackend) {
 
       switch (action) {
         case 'status': {
-          const r = await json('GET', '/api/keil/state', null, 30000, signal);
+          const r = await json('GET', '/api/keil/overview', null, 30000, signal);
           const b = r.body || {};
-          if (!b.open) return done(true, '当前没有打开任何 Keil 工程。', { open: false });
+          if (!b.ok) return done(false, '读取工程概览失败：' + (b.error || ('HTTP ' + r.status)), { status: r.status });
+          if (!b.open) {
+            return done(true,
+              '当前没有打开任何 Keil 工程。工具链：armcc ' +
+              (b.toolchain && b.toolchain.armcc ? '✓' : '✗') + '，OpenOCD ' +
+              (b.toolchain && b.toolchain.openocd ? '✓' : '✗') + '。用 open/scan 选一个工程。',
+              { open: false, toolchain: b.toolchain || null });
+          }
           const p = b.project || {};
-          return done(true,
-            '已打开：' + p.name + '（' + p.device + '，' + p.core + '，' + p.optimFlag + '，' +
-            p.sourceCount + ' 个源文件）',
-            { open: true, project: p, openedAt: b.openedAt });
+          const sp = b.spec || {};
+          const mods = Array.isArray(sp.modules) ? sp.modules : [];
+          const parts = [
+            '已打开：' + p.name + '（' + p.device + ' / ' + p.core + ' / ' + p.optimFlag + ' / ' + p.sourceCount + ' 源文件）',
+          ];
+          if (sp.has) {
+            parts.push('功能契约 ' + mods.length + ' 模块 r' + sp.revision +
+              (sp.stale === 'stale' ? ' ⚠已过期（' + sp.changedFiles + ' 个文件改过）' : '（与代码同步）'));
+          } else {
+            parts.push('还没有功能契约（首次可用 spec 全量写一份）');
+          }
+          if (b.build) {
+            const s = b.build.programSize || {};
+            parts.push('上次构建：Flash ' + s.flashBytes + '/' + ((s.flashKB || 64) * 1024) +
+              ' B，SRAM ' + s.ramBytes + ' B，' + b.build.errors + ' 错 ' + b.build.warnings + ' 警告');
+          }
+          parts.push('工具链：armcc ' + (b.toolchain.armcc ? '✓' : '✗') +
+            '，OpenOCD ' + (b.toolchain.openocd ? '✓' : '✗') +
+            '，串口 ' + ((b.toolchain.serialPorts || []).join(',') || '无'));
+          parts.push('下一步建议：' + (b.build ? '改代码→build→flash；看屏用 gfx；查变量用 symbols/readmem' : '先 build 一次，产物才能烧录/读符号'));
+          return done(true, parts.join('；'), {
+            open: true, file: b.file || null, project: p,
+            spec: { has: !!sp.has, revision: sp.revision || 0, stale: sp.stale || null, modules: mods },
+            build: b.build || null, toolchain: b.toolchain || null,
+          });
         }
 
         case 'open': {
@@ -738,27 +889,64 @@ export function mcuToolDefinition(ensureBackend) {
             });
         }
 
-        /* ── 显存 → ASCII / PBM（用户问题记录第 13 条）──
-         * 以前只能「读显存 + 用工程字模反向识别」，每次查显示问题都另写脚本。 */
+        /* ── 显存 → 指纹/差异/ASCII（用户问题记录第 13 条）──
+         * 默认只回指纹与基线差异：模型做「屏幕变没变」验证时不必拉 8 KB ASCII。 */
         case 'gfx': {
           const body = {};
           if (a.addr !== undefined && a.addr !== null && String(a.addr).trim() !== '') body.addr = String(a.addr).trim();
           if (a.invert !== undefined) body.invert = a.invert === true;
+          if (a.mode) body.mode = a.mode;
+          if (a.region !== undefined) body.region = a.region;
+          if (a.baseline) body.baseline = a.baseline;
           const r = await json('POST', '/api/keil/gfx', body, 120000, signal);
           const b = r.body || {};
           if (!b.ok) return done(false, '读屏幕失败：' + b.error, { status: r.status });
+          let head = '屏幕 ' + b.width + '×' + b.height + ' @ ' + b.addrHex +
+            (b.symbol ? '（' + b.symbol.name + '）' : '') + '；hash ' + b.hash + '；' +
+            (b.blank ? '显存全 0（屏幕可能是灭的/固件没在跑）' : '点亮 ' + b.litPixels + ' 像素');
+          if (b.diff) {
+            head += b.diff.changedPixels
+              ? '；与基线差异 ' + b.diff.changedPixels + ' 像素，区域 ' + b.diff.bbox.x0 + ',' + b.diff.bbox.y0 + '→' + b.diff.bbox.x1 + ',' + b.diff.bbox.y1
+              : '；与基线完全一致';
+          }
+          if (b.baseline && b.baseline.saved) head += '；基线已保存';
+          if (b.ascii) head += '；ASCII ' + b.asciiRegion.width + '×' + b.asciiRegion.height;
+          const data = {
+            addr: b.addrHex, width: b.width, height: b.height, invert: !!b.invert, hash: b.hash,
+            litPixels: b.litPixels, blank: !!b.blank, diff: b.diff || null, baseline: b.baseline || null,
+            file: b.file || null, symbol: b.symbol || null,
+          };
+          if (b.ascii) {
+            data.rel = '屏幕 ' + b.width + '×' + b.height + '（# 点亮 / . 熄灭）';
+            data.encoding = 'ascii';
+            data.lines = b.asciiRegion.height;
+            data.linesUnit = ' 行';
+            data.text = b.ascii;
+          }
+          return done(true, head, data);
+        }
+
+        /* ── 单会话采样（看节拍/周期）── */
+        case 'watch': {
+          if (!a.addr) throw new Error('watch 需要 addr（0x40000024 或符号名）');
+          const body = { addr: String(a.addr).trim() };
+          if (a.samples !== undefined) body.samples = Number(a.samples);
+          if (a.intervalMs !== undefined) body.intervalMs = Number(a.intervalMs);
+          const r = await json('POST', '/api/keil/watch', body, 240000, signal);
+          const b = r.body || {};
+          if (!b.ok) return done(false, '采样失败：' + b.error, { status: r.status });
+          const per = b.samples ? Math.round(b.elapsedMs / b.samples) : '?';
           return done(true,
-            '屏幕 ' + b.width + '×' + b.height + ' @ ' + b.addrHex +
-            (b.symbol ? '（符号 ' + b.symbol.name + '，' + b.symbol.size + ' B）' : '') +
-            (b.blank ? '：显存全 0 —— 屏幕可能是灭的，或固件没在跑（不是 gfx 失败）'
-              : '：点亮 ' + b.litPixels + ' 像素') +
-            '；PBM 已存 ' + b.file,
+            '采样 ' + b.samples + ' 次 @ ' + b.addrHex + (b.symbol ? '（' + b.symbol.name + '）' : '') +
+            '：first=' + b.first + ' last=' + b.last + ' min=' + b.min + ' max=' + b.max +
+            ' changes=' + b.changes + '（' + b.elapsedMs + ' ms，约 ' + per + ' ms/点）',
             {
-              addr: b.addrHex, width: b.width, height: b.height, invert: !!b.invert,
-              litPixels: b.litPixels, blank: !!b.blank, file: b.file, symbol: b.symbol || null,
-              rel: '屏幕 ' + b.width + '×' + b.height + '（# 点亮 / . 熄灭）', encoding: 'ascii',
-              lines: b.height, linesUnit: ' 行',
-              text: b.ascii || '',
+              addr: b.addrHex, symbol: b.symbol || null, samples: b.samples, intervalMs: b.intervalMs,
+              elapsedMs: b.elapsedMs, values: b.values, min: b.min, max: b.max,
+              changes: b.changes, first: b.first, last: b.last,
+              rel: '采样值（序号 / hex / decimal）', encoding: 'decimal',
+              lines: b.samples, linesUnit: ' 个样本',
+              text: (b.values || []).map((v, i) => String(i).padStart(3) + '  0x' + (v >>> 0).toString(16).padStart(8, '0') + '  ' + v).join('\n'),
             });
         }
 
@@ -811,7 +999,11 @@ export function mcuToolDefinition(ensureBackend) {
               '"files":[".\\\\User\\\\UI.c"]}]}',
               { got: raw.slice(0, 400) });
           }
-          const r = await json('POST', '/api/features', { modules: parsed, by: 'ai' }, 30000, signal);
+          const isPatch = parsed && !Array.isArray(parsed) && !parsed.modules && (parsed.updates || parsed.remove);
+          const payload = isPatch
+            ? { updates: parsed.updates || [], remove: parsed.remove || [] }
+            : { modules: parsed };
+          const r = await json('POST', '/api/features', Object.assign(payload, { by: 'ai' }), 30000, signal);
           const b = r.body || {};
           if (!b.ok) {
             return done(false, '保存功能描述失败：' + (b.error || ('HTTP ' + r.status)), { status: r.status });
@@ -819,7 +1011,7 @@ export function mcuToolDefinition(ensureBackend) {
           const n = (b.spec && b.spec.modules ? b.spec.modules.length : 0);
           const st = b.stale || {};
           return done(true,
-            '功能描述已保存：' + n + ' 个模块，r' + ((b.spec && b.spec.revision) || 0) +
+            '功能描述已' + (isPatch ? '增量更新' : '保存') + '：' + n + ' 个模块，r' + ((b.spec && b.spec.revision) || 0) +
             (b.changed === false ? '（内容没变，没有新增版本）' : '') +
             '。面板上现在显示的就是这份，用户可以直接改。' +
             (st.state === 'stale' ? ' ⚠ 但描述时间仍早于最新源码（' + st.changedFiles + ' 个文件），检查一下是不是漏写了。' : ''),
