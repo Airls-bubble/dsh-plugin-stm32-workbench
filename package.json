@@ -1,9 +1,9 @@
 {
   "name": "dsh-plugin-stm32-workbench",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
-  "description": "STM32F103C8T6 开发工作台：在 DSH 会话里直接编译、烧录、看串口、规划引脚。",
+  "description": "嵌入式开发工作台：在 DSH 会话里直接编译、烧录、看串口、规划引脚；工程卡记录芯片/工具链/引脚，换工程不用重新猜。",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",

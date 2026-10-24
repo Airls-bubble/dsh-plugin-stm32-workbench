@@ -22,6 +22,7 @@ const srcfileMod = require('./srcfile');
 const featuresMod = require('./features');
 const symbolsMod = require('./symbols');
 const gfxMod = require('./gfx');
+const projectcardMod = require('./projectcard');
 const paths = require('./paths');
 
 /** 当前打开的 Keil 工程（持久化，重启后界面能自动恢复） */
@@ -401,11 +402,91 @@ async function handleApi(req, res, url) {
   if (p === '/api/keil/pins' && req.method === 'GET') {
     if (!ensureKeil()) { sendJson(res, 409, { ok: false, error: '还没有打开 Keil 工程（先调 /api/keil/open）' }); return; }
     try {
+      /* 工程卡里写了引脚表就以卡为准：那是用户/AI 明确声明的「物理真相」，
+         比从 SPL 结构体反推出来的更可信（反推是为了「没卡的历史工程」保底）。
+         卡里没有引脚表时才扫源码 —— 结论会标明 fromCard，避免两边混淆。 */
+      const cardRead = projectcardMod.read(currentKeil.model.dir);
+      const family = (cardRead.card && cardRead.card.target && cardRead.card.target.family) || 'stm32';
+      const cardPins = cardRead.has && !cardRead.broken && cardRead.card && cardRead.card.pins &&
+        Array.isArray(cardRead.card.pins.map) ? cardRead.card.pins.map : [];
+      if (cardPins.length) {
+        sendJson(res, 200, {
+          ok: true, project: currentKeil.model.name, fromCard: true,
+          cardPath: cardRead.path, cardMtime: cardRead.mtime,
+          pins: cardPins.map((entry) => {
+            const o = entry && typeof entry === 'object' ? entry : { pin: entry };
+            return {
+              pin: projectcardMod.normalizePin(o.pin != null ? o.pin : o.gpio, family),
+              signal: o.signal || null, mode: o.mode || null,
+              peripheral: o.peripheral || null, note: o.note || null,
+            };
+          }),
+          /* 卡里的自相矛盾（引脚冲突等）直接当冲突带出去，别让模型以为卡=正确 */
+          conflicts: (cardRead.validation.errors || []).map((reason) => ({ severity: 'danger', reason })),
+          reconfigs: [],
+          orderSource: 'project.json（工程卡，权威）',
+          clock: null,
+        });
+        return;
+      }
       const pinmap = pinmapMod.scanProjectPins(currentKeil.model);
-      sendJson(res, 200, Object.assign({ ok: true, project: currentKeil.model.name }, pinmap));
+      sendJson(res, 200, Object.assign({ ok: true, project: currentKeil.model.name, fromCard: false }, pinmap));
     } catch (err) {
       sendJson(res, 500, { ok: false, error: String(err.message || err) });
     }
+    return;
+  }
+
+  /* ───────── 工程卡（<工程>/.dsh-mcu/project.json）─────────
+   * 工程事实（芯片 / 工具链 / 烧录端口 / 引脚表 / 外设）的单一来源。
+   * 逻辑全在 server/projectcard.js，这里只做 HTTP 薄壳（面板与 mcu 工具同一条路径）。
+   * 注意：**不要求已打开 Keil 工程** —— 给 path 就能读写；ESP-IDF 工程没有 .uvprojx，
+   * 靠这条接口先描述出来，后端适配器以后按卡执行 build/flash。 */
+  function projectInput(body) {
+    if (body && body.path) return body.path;
+    const cur = currentKeil || loadRecent();
+    if (!cur) {
+      const e = new Error('还没有打开工程，也没有给 path。给 path=工程目录（或 .uvprojx），或先 open');
+      e.code = 'NO_PROJECT'; throw e;
+    }
+    return cur.model.dir;
+  }
+
+  function sendProjectError(res, err) {
+    const code = err.code || null;
+    const status = code === 'NO_PROJECT' ? 409
+      : (code === 'NO_PATH' || code === 'BAD_PATH') ? 404
+        : code === 'EXISTS' ? 409 : 400;
+    sendJson(res, status, { ok: false, code, error: String(err.message || err) });
+  }
+
+  if (p === '/api/project' && req.method === 'GET') {
+    try {
+      const u = new URL(req.url, 'http://127.0.0.1');
+      const q = u.searchParams.get('path');
+      sendJson(res, 200, projectcardMod.read(projectInput(q ? { path: q } : null)));
+    } catch (err) { sendProjectError(res, err); }
+    return;
+  }
+
+  if (p === '/api/project' && req.method === 'POST') {
+    let body = {};
+    try { body = await readBody(req); } catch (_) { /* 允许空 body */ }
+    try {
+      const op = String(body.op || 'read').trim().toLowerCase();
+      const input = projectInput(body);
+      let out;
+      if (op === 'read') out = projectcardMod.read(input);
+      else if (op === 'import') out = projectcardMod.importCard(input);
+      else if (op === 'init') out = projectcardMod.initCard(input);
+      else if (op === 'write') out = projectcardMod.writeContent(input, body.content);
+      else if (op === 'validate') out = projectcardMod.validateOnly(input);
+      else {
+        const e = new Error('未知 op：' + op + '（read / import / init / write / validate）');
+        e.code = 'BAD_OP'; throw e;
+      }
+      sendJson(res, 200, Object.assign({ ok: out.ok !== false }, out));
+    } catch (err) { sendProjectError(res, err); }
     return;
   }
 
@@ -502,6 +583,20 @@ async function handleApi(req, res, url) {
           };
         } catch (err) {
           out.spec = { has: false, error: String(err.message || err) };
+        }
+        /* 工程卡摘要：AI 换了工程直接在这儿看到芯片/工具链/引脚数/串口，
+           不用再调一次 project（省一轮往返）。 */
+        try {
+          const cr = projectcardMod.read(cur.model.dir);
+          out.card = {
+            has: !!cr.has, broken: !!cr.broken, path: cr.path,
+            summary: cr.summary || null,
+            counts: cr.validation.counts,
+            missing: cr.validation.missing,
+            errors: cr.validation.errors,
+          };
+        } catch (err) {
+          out.card = { has: false, error: String(err.message || err) };
         }
         if (!lastKeilBuild) lastKeilBuild = loadLastBuild();
         if (lastKeilBuild) {

@@ -111,7 +111,7 @@ const TOOL_NAME = 'mcu';
 
 /** 所有 action 及其用途，description 与校验共用一份，避免说一套做一套 */
 const TOOL_ACTIONS = [
-  'status', 'open', 'scan', 'files', 'read', 'write',
+  'status', 'project', 'open', 'scan', 'files', 'read', 'write',
   'build', 'flash', 'size', 'pins', 'regs', 'chip', 'reset', 'spec',
   'symbols', 'readmem', 'gfx', 'watch',
 ];
@@ -128,11 +128,14 @@ const TOOL_ACTIONS = [
 const DEFAULT_READ_LINES = 400;
 
 const TOOL_DESCRIPTION = [
-  'STM32F103 工作台（Keil AC5 + ST-Link/OpenOCD）。',
-  '**先 status 一次拿到工程/契约/构建/工具链全貌，再动手**（不要 status→spec→size→chip 连调四次）。',
-  'action：status=全貌；open/scan=选工程；files/read/write=源码（write 按原编码、可新建）；',
+  '嵌入式工作台（当前后端：STM32F103 + Keil AC5/ST-Link；工程卡可描述 ESP-IDF 等其它工具链，后端逐个接入）。',
+  '**先 status 一次拿到工程/工程卡/契约/构建/工具链全貌，再动手**（不要 status→spec→size→chip 连调四次）。',
+  'action：status=全貌；project=工程卡；open/scan=选工程；files/read/write=源码（write 按原编码、可新建）；',
+  'project=**工程卡** .dsh-mcu/project.json（芯片/工具链/烧录端口/引脚表/外设，与工具链无关，换工程直接读它）。' +
+  '不带 op 读；op=import 从 .uvprojx 生成草案；op=init 按目录证据认 ESP-IDF/PlatformIO 建骨架；' +
+  'op=write 只发改动字段（深合并，数组整体替换，null 删字段）；op=validate 只校验不写。导入不猜引脚/串口。',
   'build=编译（返回结构化诊断，产物带 map）；flash=烧上次构建（烧完自动运行）；size=占用排行；',
-  'pins=引脚；regs=寄存器/时钟；chip=探测芯片；reset=复位；',
+  'pins=引脚（工程卡里有引脚表就以卡为准，否则从源码推导）；regs=寄存器/时钟；chip=探测芯片；reset=复位；',
   'open=打开工程（path 给 .uvprojx 或目录）；scan=扫目录里的工程（dir）；files=源文件与编码；',
   'read=读源码（path 用工程内相对路径，如 .\\User\\main.c；默认前 ' + DEFAULT_READ_LINES + ' 行，大文件用 offset/limit）；',
   'write=写源码（path + content，可选 expectMtime/encoding）——已有文件按原编码写回并备份，文件不存在按 encoding 新建；',
@@ -161,13 +164,22 @@ const TOOL_PARAMETERS = {
     },
     path: {
       type: 'string',
-      description: 'open 用：.uvprojx 或目录；read/write 用：工程内的相对路径（如 .\\User\\main.c）。',
+      description: 'open 用：.uvprojx 或目录；read/write 用：工程内的相对路径（如 .\\User\\main.c）；' +
+        'project 用：工程目录 / .dsh-mcu/project.json / .uvprojx（缺省=当前工程）。',
+    },
+    op: {
+      type: 'string',
+      enum: ['read', 'import', 'init', 'write', 'validate'],
+      description: 'project 用：read（默认，读工程卡）| import（从 .uvprojx 生成草案并落盘，已有卡不覆盖）| ' +
+        'init（按目录证据识别 ESP-IDF/PlatformIO/Keil，建骨架）| write（增量写入）| ' +
+        'validate（只校验不写；路径是 .uvprojx 且还没卡时，预览 import 会生成什么）。',
     },
     dir: { type: 'string', description: 'scan 用：要搜索 .uvprojx 的目录。' },
     content: {
       type: 'string',
       description: 'write 用：写进文件的完整文本。' +
-        'spec 用：功能描述 JSON。全量 {"modules":[…]}；增量 {"updates":[{id,…}]} 或 {"remove":[id]}（推荐日常用）。',
+        'spec 用：功能描述 JSON。全量 {"modules":[…]}；增量 {"updates":[{id,…}]} 或 {"remove":[id]}（推荐日常用）。' +
+        'project 用（op=write）：工程卡补丁 JSON，只写要改的部分，深合并、数组整体替换、null 删字段。',
     },
     offset: { type: 'number', description: 'read 用：起始行号，从 1 开始。缺省 1。' },
     limit: { type: 'number', description: 'read 用：最多读几行，缺省 ' + DEFAULT_READ_LINES + '，上限 2000。' },
@@ -337,6 +349,10 @@ function pickMeta(action, data) {
   };
   if (action === 'read') return pick(['rel', 'encoding', 'bytes', 'lines', 'truncated', 'mtime', 'offset']);
   if (action === 'spec') return pick(['has', 'broken', 'error', 'revision', 'updatedAt', 'stale', 'project']);
+  if (action === 'project') {
+    return pick(['has', 'op', 'changed', 'dryRun', 'path', 'cardSummary', 'detected',
+      'counts', 'missing', 'errors', 'warnings', 'backup']);
+  }
   if (action === 'readmem') return pick(['addr', 'length', 'symbol', 'hex']);
   if (action === 'gfx') return pick(['addr', 'width', 'height', 'hash', 'litPixels', 'blank', 'diff', 'baseline', 'file']);
   if (action === 'watch') return pick(['addr', 'symbol', 'samples', 'intervalMs', 'elapsedMs', 'min', 'max', 'changes', 'first', 'last']);
@@ -360,6 +376,15 @@ function compactLines(action, data) {
       if (sp.modules && sp.modules.length) {
         add('模块：' + sp.modules.slice(0, 12).map((m) => m.id + '/' + m.status).join(' ') + (sp.modules.length > 12 ? ' …' : ''));
       }
+    }
+    if (data.card) {
+      const cd = data.card;
+      if (cd.broken) add('工程卡：JSON 损坏');
+      else if (cd.has) {
+        add('工程卡：' + (cd.summary || '') +
+          ((cd.missing || []).length ? '（待补 ' + cd.missing.length + '）' : '') +
+          ((cd.errors || []).length ? ' ⛔ ' + cd.errors.length + ' 处冲突' : ''));
+      } else add('工程卡：还没有（project op=import 生成）');
     }
     if (data.build) {
       const b = data.build; const s = b.programSize || {};
@@ -571,6 +596,19 @@ export function mcuToolDefinition(ensureBackend) {
           } else {
             parts.push('还没有功能契约（首次可用 spec 全量写一份）');
           }
+          const cd = b.card || null;
+          if (cd && cd.has && cd.broken) {
+            parts.push('工程卡：JSON 损坏（' + (cd.path || '') + '），需修复或删掉重新 import');
+          } else if (cd && cd.has) {
+            const cdMissing = cd.missing || [];
+            const cdErrors = cd.errors || [];
+            parts.push('工程卡：' + (cd.summary || '') +
+              (cdMissing.length ? '（待补 ' + cdMissing.length + ' 项：' + cdMissing.slice(0, 2).join('；') +
+                (cdMissing.length > 2 ? ' …' : '') + '）' : '') +
+              (cdErrors.length ? ' ⛔ ' + cdErrors.length + ' 处冲突' : ''));
+          } else {
+            parts.push('工程卡：还没有（action=project op=import 可从 .uvprojx 生成草案）');
+          }
           if (b.build) {
             const s = b.build.programSize || {};
             parts.push('上次构建：Flash ' + s.flashBytes + '/' + ((s.flashKB || 64) * 1024) +
@@ -583,8 +621,68 @@ export function mcuToolDefinition(ensureBackend) {
           return done(true, parts.join('；'), {
             open: true, file: b.file || null, project: p,
             spec: { has: !!sp.has, revision: sp.revision || 0, stale: sp.stale || null, modules: mods },
+            card: b.card || null,
             build: b.build || null, toolchain: b.toolchain || null,
           });
+        }
+
+        case 'project': {
+          /* 工程卡：芯片 / 工具链 / 烧录端口 / 引脚表 / 外设的单一来源。
+             为什么单独一个 action：换工程、换板子、换芯片时模型第一件要问的就是这些；
+             以前只能 open→pins→regs 逐个试，或者自己扫源码猜，还是猜不准。 */
+          const op = String(a.op || 'read').trim().toLowerCase();
+          const body = { op };
+          if (a.path) body.path = a.path;
+          if (op === 'write') {
+            if (typeof a.content !== 'string' || !a.content.trim()) {
+              throw new Error('project op=write 需要 content（工程卡补丁 JSON，只写要改的字段，深合并）');
+            }
+            body.content = a.content;
+          }
+          const r = await json('POST', '/api/project', body, 60000, signal);
+          const b = r.body || {};
+          if (!b.ok) {
+            return done(false,
+              '工程卡 ' + op + ' 失败：' + (b.error || ('HTTP ' + r.status)),
+              { status: r.status, code: b.code || null, has: !!b.has, path: b.path || null, validation: b.validation || null });
+          }
+          const v = b.validation || {};
+          const counts = v.counts || { pins: 0, reserved: 0, peripherals: 0 };
+          const missing = v.missing || [];
+          const errs = v.errors || [];
+          const warns = v.warnings || [];
+          const tail = (errs.length ? '　⛔ ' + errs.length + ' 处冲突：' + errs[0]
+            : (missing.length ? '　待补：' + missing.slice(0, 3).join('；') : ''));
+          let head;
+          if (op === 'read') {
+            head = b.has
+              ? (b.broken ? '工程卡 JSON 损坏：' + (b.error || '')
+                : '工程卡：' + (b.summary || '') + '（引脚 ' + counts.pins + '，外设 ' + counts.peripherals + '）')
+              : '还没有工程卡（.dsh-mcu/project.json）：op=import 从 .uvprojx 生成，或 op=init 识别目录里的工具链';
+          } else if (op === 'import') {
+            head = '已从 ' + ((b.detected && b.detected.evidence && b.detected.evidence[0]) || '.uvprojx') +
+              ' 生成工程卡草案：' + (b.summary || '') + '（只填了工程文件里确有的字段，引脚/串口请补）';
+          } else if (op === 'init') {
+            head = '已新建工程卡：' + (b.summary || '') + '（识别依据 ' +
+              ((b.detected && b.detected.evidence) || []).join('、') + '）';
+          } else if (op === 'write') {
+            head = '工程卡已' + (b.changed ? '更新' : '写入（内容没变）') + '：' + (b.summary || '');
+          } else {
+            head = (b.dryRun ? '草案校验（未写入）：' : '工程卡校验：') + (b.summary || '');
+          }
+          const data = {
+            has: !!b.has, op, changed: !!b.changed, dryRun: !!b.dryRun,
+            path: b.path || null, dir: b.dir || null,
+            cardSummary: b.summary || null,
+            detected: b.detected || null,
+            counts, missing, errors: errs, warnings: warns,
+            backup: b.backup || null,
+            text: typeof b.text === 'string' ? b.text : '',
+            rel: '工程卡 project.json', encoding: 'json',
+          };
+          /* full:true 才把原始 JSON 正文给出来（日常读 text 就够，省 token） */
+          if (a.full === true && b.card) data.text = JSON.stringify(b.card, null, 1);
+          return done(true, head + tail, data);
         }
 
         case 'open': {
@@ -775,11 +873,20 @@ export function mcuToolDefinition(ensureBackend) {
           const reconfigs = b.reconfigs || [];
           const pins = cap(b.pins, 60);
           const danger = conflicts.filter((c) => c.severity === 'danger');
+          /* 来源必须说清楚：工程卡是「人/AI 声明的物理真相」，源码推导是「从 SPL 结构体还原」，
+             两者结论不同，模型要能分辨，否则会把推导结果当成已知事实。 */
+          const source = b.fromCard
+            ? '工程卡 project.json（权威' + (b.cardMtime ? '，' + new Date(b.cardMtime).toLocaleString() + ' 修改' : '') + '）'
+            : '源码推导' + (typeof b.orderSource === 'string' && b.orderSource ? ' · ' + b.orderSource : '');
           return done(true,
-            '解析出 ' + pins.total + ' 个引脚；冲突 ' + conflicts.length +
+            '引脚 ' + pins.total + ' 个（来源：' + source + '）；冲突 ' + conflicts.length +
             ' 处（其中严重 ' + danger.length + ' 处），良性重配 ' + reconfigs.length + ' 处。' +
             (danger.length ? '严重冲突：' + (danger[0].pin || '') + ' ' + (danger[0].reason || danger[0].message || '') : ''),
-            { pins: pins.rows, conflicts, reconfigs, orderSource: b.orderSource || null, clock: b.clock || null });
+            {
+              pins: pins.rows, conflicts, reconfigs, fromCard: !!b.fromCard,
+              cardPath: b.cardPath || null, cardMtime: b.cardMtime || null,
+              orderSource: b.orderSource || null, clock: b.clock || null,
+            });
         }
 
         case 'regs': {

@@ -144,5 +144,29 @@
    baseline save/compare/clear、watch、spec 增量），全套通过。硬件相关 action 在未接 ST-Link 时
    仍按「如实失败」断言。
 
+## 2026-10-24：0.5.0 工程卡（为接 ESP32-S3-CAM 铺路）
+
+背景：下一步要开发 ESP32-S3-CAM，没有 Keil 工程文件；如果继续把 `.uvprojx` 当唯一工程信息源，
+就得再写第二套解析器，工具接口开始分叉（「STM32 这样问、ESP32 那样问」）。所以先把「工程事实」抽出来。
+
+1. **新 action `project`（第 19 个）**：`.dsh-mcu/project.json` 记录
+   `target`（家族/芯片/核心/时钟/Flash/RAM/PSRAM）、`toolchain`（后端/工程文件/编译器）、
+   `runtime`（烧录方式/调试器/串口）、`pins`（map + reserved）、`peripherals`、`files`、`contract`。
+2. **op 五种**：`read`（默认）/ `import`（从 .uvprojx 抽有证据的字段）/ `init`（按 CMakeLists+sdkconfig、
+   platformio.ini、.uvprojx 识别工具链建骨架）/ `write`（深合并补丁，数组整体替换，null 删字段）/
+   `validate`（只读；路径是 .uvprojx 且没卡时预览 import 结果）。
+3. **导入不猜**：引脚表、串口、烧录端口一律留空并进 `missing`；`import`/`init` 遇到已有卡拒绝覆盖
+   （手写/确认过的事实不能被一次误调用冲掉）。
+4. **校验分层**：schema、family/backend 白名单、引脚重复/冲突、保留脚被占用、外设引用不在表里的脚、
+   `toolchain.projectFile` 是否真的存在；`errors`（自相矛盾）/ `missing`（该补什么）/ `warnings`（可疑）分开。
+5. **接入现有链路**：`status` 带回卡摘要；`pins` 有卡时以卡为准（`fromCard=true` + 卡 mtime），
+   没有才回退源码推导；新增 `GET/POST /api/project`，面板与工具同源。
+6. **位置**：`<工程>/.dsh-mcu/project.json`（与 features.json 同一套「跟工程走」的落点）；
+   想进 git 在工程 `.gitignore` 里加 `!.dsh-mcu/project.json`。
+7. 回归：新增 `test-projectcard.js`（路径解析/深合并/冲突/ESP-IDF 与 PlatformIO 识别/坏 JSON，
+   全程临时目录，不碰真实工程）；`test-mcu-tool.js` 覆盖 `project` 全流程 + 临时卡验证 `pins fromCard`；
+   其余套件（src-api / diag / features）全绿。
+
+**尚未做**：ESP-IDF / PlatformIO 的 build/flash 后端适配器（当前只有卡与工具链识别，执行仍走 Keil 后端）。
 
 **注意**：修复需要**重启 DSH** 才会加载。

@@ -72,6 +72,7 @@ node backend/scripts/test-diag.js      # 用真 armcc 编一个故意写错的�
 ```
 node backend/scripts/test-src-api.js   # 沙箱在系统临时目录，不碰你的工程
 node backend/scripts/test-features.js  # 功能契约：纯逻辑 + 沙箱端到端
+node backend/scripts/test-projectcard.js # 工程卡：纯逻辑，全程临时目录，不碰你的工程
 node backend/scripts/test-mcu-tool.js  # 会真的编译一次你的工程
 node backend/scripts/keil-verify.js    # 与 Keil 自己编出的 Objects\Project.hex 逐字节比对
 ```
@@ -98,6 +99,8 @@ $env:MCU_AGENT_PORT='18990'; node backend/server/server.js
 <你打开的 Keil 工程目录>/
 └── .dsh-mcu/                  ← 跟这个工程有关的一切，全部可以安全删除
     ├── .gitignore             ← 内容就是 `*`，不会误提交
+    ├── project.json           ← 工程卡：芯片/工具链/烧录端口/引脚表（AI 换工程先读它）
+    ├── features.json          ← 功能契约：模块化行为描述（用户唯一会读的东西）
     ├── build/keil/<工程>-<哈希>/   ← 构建产物（.o/.axf/.hex/.bin/Project.map）
     ├── last-build.json        ← 构建账本（占用、诊断、产物路径）
     ├── logs/                  ← armlink 完整输出
@@ -120,7 +123,25 @@ $env:MCU_AGENT_PORT='18990'; node backend/server/server.js
 
 ---
 
-## 五、常见问题
+## 五、接别的工具链（ESP-IDF / PlatformIO）
+
+0.5.0 起「工程事实」已经和工具链解耦：`<工程>/.dsh-mcu/project.json` 里的
+`toolchain.backend` 决定该由谁执行 build/flash，`init` 能自动识别 ESP-IDF（CMakeLists + sdkconfig/main）
+与 PlatformIO（platformio.ini）。**目前只有 `keil-ac5` 后端真正接了执行链路**，其它后端只有卡与识别。
+
+接一个新后端的步骤（按顺序，每步都能独立验证）：
+
+1. `backend/server/backends/<name>.js`：实现 `detect(dir)`、`build(dir, opts)`、`flash(port, opts)`、
+   `monitor(port)`，返回结构化诊断（文件/行号/错误码/原文），**不要解析给人看的日志**。
+2. `server.js` 里按 `projectcard.read(dir).card.toolchain.backend` 分发；未实现的 backend 明确回
+   「后端未接入」，不要悄悄退回 Keil —— 用错工具链烧错芯片的代价比报错大。
+3. `mcu` 工具的 `project` / `status` 不需要改：它们只读卡。
+4. 测试：`test-projectcard.js` 加该工具链的目录识别用例；后端执行链路另写脚本，
+   硬件相关断言只要求「如实失败」。
+
+---
+
+## 六、常见问题
 
 **mcu 报「后端启动失败 / 后端启动超时 / EADDRINUSE」**
 先看 `http://127.0.0.1:<DSH 端口>/mcu/state`：

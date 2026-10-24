@@ -14,6 +14,7 @@
  * 退出码：0 通过 / 1 断言失败 / 2 前提缺失
  */
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 const { pathToFileURL } = require('node:url');
@@ -424,6 +425,119 @@ function auditSchema(node, where, problems) {
       /失败|报错|拒绝|Error|OpenOCD|没有/i.test(wt.summary), wt.summary);
   }
   covered.push('watch');
+
+  /* project = 工程卡（.dsh-mcu/project.json）：换工程/换芯片时唯一该读的事实层。
+     ⚠ **不往用户的真实工程里写卡**：用临时目录 + 复制一份 .uvprojx 跑全流程；
+       真实工程只做只读的 project/read。 */
+  const cardRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mcu-tool-card-'));
+  try {
+    const pr = await run({ action: 'project' });
+    console.log('    project → ' + pr.summary.slice(0, 130));
+    check('project: 输出形状合法', shapeOk(pr));
+    check('project: 真实工程只读成功（有没有卡都应是正常状态）',
+      pr.ok === true && typeof pr.data.has === 'boolean');
+
+    fs.copyFileSync(proj, path.join(cardRoot, path.basename(proj)));
+    const pv = await run({ action: 'project', op: 'validate', path: cardRoot });
+    console.log('    project/validate → ' + pv.summary.slice(0, 130));
+    check('project: op=validate 给草案且不落盘',
+      pv.ok === true && pv.data.dryRun === true &&
+      !fs.existsSync(path.join(cardRoot, '.dsh-mcu', 'project.json')), pv.summary);
+    check('project: 草案从 .uvprojx 抽到芯片家族',
+      /stm32/.test(String(pv.data.cardSummary || '')), pv.summary);
+
+    const pi = await run({ action: 'project', op: 'import', path: cardRoot });
+    console.log('    project/import  → ' + pi.summary.slice(0, 130));
+    check('project: op=import 落盘并带回芯片/工具链',
+      pi.ok === true && pi.data.has === true &&
+      fs.existsSync(path.join(cardRoot, '.dsh-mcu', 'project.json')), pi.summary);
+    check('project: 导入结果标明 keil-ac5 且引脚数 0（不猜引脚）',
+      /keil-ac5/.test(pi.summary) && pi.data.counts.pins === 0, pi.summary);
+
+    const pw = await run({
+      action: 'project', op: 'write', path: cardRoot,
+      content: JSON.stringify({
+        pins: { map: [{ pin: 'PB8', signal: 'OLED_SCL', mode: 'out-od' }] },
+        runtime: { serial: { port: 'COM9', baud: 115200 } },
+      }),
+    });
+    console.log('    project/write   → ' + pw.summary.slice(0, 130));
+    check('project: op=write 深合并并更新计数',
+      pw.ok === true && pw.data.changed === true && pw.data.counts.pins === 1, pw.summary);
+    check('project: write 后仍保留 import 的字段（深合并没整份覆盖）',
+      fs.existsSync(path.join(cardRoot, '.dsh-mcu', 'project.json')) &&
+      JSON.parse(fs.readFileSync(path.join(cardRoot, '.dsh-mcu', 'project.json'), 'utf8')).toolchain.backend === 'keil-ac5');
+
+    const pr2 = await run({ action: 'project', path: cardRoot });
+    check('project: 读回内容一致（引脚 1 个、串口 COM9）',
+      pr2.ok === true && pr2.data.counts.pins === 1 &&
+      /COM9/.test(JSON.stringify(pr2.data.cardSummary || '') + pr2.data.text), pr2.summary);
+    const pfull = await run({ action: 'project', path: cardRoot, full: true });
+    check('project: full:true 的正文是原始 JSON（要整份才用）', (() => {
+      const blocks = def.output.render({ action: 'project', full: true }, pfull);
+      return blocks.some((b) => b.type === 'text' && /"pins"/.test(b.text));
+    })(), pfull.summary);
+
+    const pc = await run({
+      action: 'project', op: 'write', path: cardRoot,
+      content: JSON.stringify({ pins: { map: [{ pin: 'PB8', signal: 'A' }, { pin: 'PB8', signal: 'B' }] } }),
+    });
+    check('project: 引脚冲突在摘要里明说（ok 但带 errors）',
+      pc.ok === true && (pc.data.errors || []).length >= 1 && /冲突/.test(pc.summary), pc.summary);
+
+    /* ESP-IDF 目录：靠证据文件识别，不猜引脚/串口 */
+    const idfDir = path.join(cardRoot, 'esp32-cam');
+    fs.mkdirSync(path.join(idfDir, 'main'), { recursive: true });
+    fs.writeFileSync(path.join(idfDir, 'CMakeLists.txt'), 'project(esp32cam)\n', 'utf8');
+    fs.writeFileSync(path.join(idfDir, 'sdkconfig'), '# auto\n', 'utf8');
+    fs.writeFileSync(path.join(idfDir, 'main', 'CMakeLists.txt'), 'idf_component_register()\n', 'utf8');
+    const pu = await run({ action: 'project', op: 'init', path: idfDir });
+    console.log('    project/init    → ' + pu.summary.slice(0, 130));
+    check('project: op=init 从证据文件认出 ESP-IDF', pu.ok === true && /esp-idf/.test(pu.summary), pu.summary);
+    const pr3 = await run({ action: 'project', path: idfDir });
+    check('project: ESP-IDF 卡把「烧录串口未填」列为待补',
+      pr3.ok === true && (pr3.data.missing || []).some((m) => /烧录串口/.test(m)),
+      JSON.stringify(pr3.data.missing));
+
+    const again = await run({ action: 'project', op: 'import', path: cardRoot });
+    check('project: 已有卡时 import 拒绝覆盖（不冲掉手写引脚表）',
+      again.ok === false && /已经有工程卡/.test(again.summary), again.summary);
+    covered.push('project');
+
+    /* pins 以工程卡为准（有卡时不再扫源码）—— 临时往真实工程写一张卡，finally 删掉。
+       这条是整件事的收益点：换工程时不用重扫源码就能拿到「这块板子接了什么」。 */
+    const realCardFile = path.join(path.dirname(proj), '.dsh-mcu', 'project.json');
+    if (!fs.existsSync(realCardFile)) {
+      try {
+        fs.mkdirSync(path.dirname(realCardFile), { recursive: true });
+        fs.writeFileSync(realCardFile, JSON.stringify({
+          schema: 1,
+          target: { family: 'stm32', chip: 'STM32F103C8' },
+          toolchain: { backend: 'keil-ac5', projectFile: path.basename(proj) },
+          runtime: { flash: { method: 'swd', probe: 'st-link' } },
+          pins: { map: [{ pin: 'PC13', signal: 'LED', mode: 'out', note: '低电平点亮' }], reserved: [] },
+        }, null, 2), 'utf8');
+        const pnCard = await run({ action: 'pins' });
+        check('pins: 有工程卡时以卡为准（fromCard=true，不再扫源码）',
+          pnCard.ok === true && pnCard.data.fromCard === true &&
+          pnCard.data.pins.length === 1 && pnCard.data.pins[0].pin === 'PC13',
+          pnCard.summary + ' | ' + JSON.stringify(pnCard.data.pins));
+        const stCard = await run({ action: 'status' });
+        check('status: 带回工程卡摘要（换工程一眼看到芯片/引脚数）',
+          stCard.ok === true && !!stCard.data.card && stCard.data.card.has === true &&
+          /stm32|STM32F103C8/.test(JSON.stringify(stCard.data.card)),
+          stCard.summary);
+        const prCard = await run({ action: 'project' });
+        check('project: 读真实工程里的卡（引脚 1）', prCard.ok === true && prCard.data.counts.pins === 1, prCard.summary);
+      } finally {
+        try { fs.unlinkSync(realCardFile); } catch (_) { /* 没建出来也无妨 */ }
+      }
+    } else {
+      console.log('    pins/card → 跳过（真实工程已有工程卡，不动它）');
+    }
+  } finally {
+    try { fs.rmSync(cardRoot, { recursive: true, force: true }); } catch (_) { /* 清理失败不影响结论 */ }
+  }
 
   if (WITH_FLASH) {
     const fls = await run({ action: 'flash' });

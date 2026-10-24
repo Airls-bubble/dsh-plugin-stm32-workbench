@@ -2,9 +2,10 @@
 
 把 STM32 工作台做成 DSH 插件：**不另开浏览器**，在 DSH 里选工作区 → 会话进入「单片机模式」→ 工作台就在会话视图里。
 
-> **当前版本 0.4.0，适配 DSH 0.2.1-rc.2（2026-10-19/20）**。mcu 工具 **18 个 action**
-> （0.3.0 新增 `symbols`/`readmem`/`gfx`，0.4.0 新增 `watch` 并重做为「AI 省 token」形态：
-> status 一次拿全貌、紧凑输出、gfx 基线差异、spec 增量更新）。升级适配的根因与修复见文末。
+> **当前版本 0.5.0，适配 DSH 0.2.1-rc.2（2026-10-24）**。mcu 工具 **19 个 action**
+> （0.3.0 新增 `symbols`/`readmem`/`gfx`；0.4.0 新增 `watch` 并重做为「AI 省 token」形态；
+> 0.5.0 新增 `project` 工程卡：芯片/工具链/烧录端口/引脚表落成与工具链无关的 JSON，换工程直接读）。
+> 升级适配的根因与修复见文末。
 
 ## 目录中为什么不是「挂在每个对话下面」
 
@@ -189,8 +190,8 @@ AI 自己跑 `node scripts/*.js` 或手拼 URL —— 同一个逻辑两条路�
 
 ### ① 宿主注册 `mcu` 工具（`index.js`）
 
-一个工具、18 个 action：
-`status/open/scan/files/read/write/build/flash/size/pins/regs/chip/reset/spec/symbols/readmem/gfx/watch`。
+一个工具、19 个 action：
+`status/project/open/scan/files/read/write/build/flash/size/pins/regs/chip/reset/spec/symbols/readmem/gfx/watch`。
 AI 与界面从此落在**同一套 /api** 上。
 
 2026-10-18 新增三项（对应用户《工具问题记录》第 1/3/13 条）：
@@ -278,8 +279,13 @@ const OURS_DIR = 'D:\\AI workspace\\stm32-workbench\\backend\\firmware\\build\\k
 
 ```
 <工程>\.dsh-mcu\features.json            模块化的自然语言功能描述（跟工程走）
+<工程>\.dsh-mcu\project.json             工程卡：芯片/工具链/烧录端口/引脚表/外设（与工具链无关）
 <工程>\.dsh-mcu\features-history\*.json  最近 20 版，面板上可一键退回
 ```
+
+`.dsh-mcu/` 默认被 `.gitignore` 里的 `*` 挡住。**想让工程卡跟着仓库走**（推荐：
+它描述的是硬件事实，换机器/换协作者都该带着），在工程 `.gitignore` 里加一行
+`!.dsh-mcu/project.json` 即可。
 
 模块形状 `{id, name, summary, detail, files[], status}`，
 `status ∈ done 已实现 / partial 部分实现 / todo 还没做 / broken 有问题`。
@@ -330,6 +336,43 @@ node backend/scripts/keil-verify.js     # 与 Keil 产物逐字节比对（自�
 （打开沙箱工程会覆盖「上次打开的工程」，踩过两次）。
 `test-mcu-tool.js` 里 `symbols` 依赖一次成功构建，`readmem`/`gfx`/`watch`/`chip`/`reset` 依赖实物 ST-Link ——
 没有硬件时这几项会**如实失败**（脚本断言的是「如实」，不是「必须成功」）。
+
+## 0.5.0：工程卡（2026-10-24）—— 换工程不用重新猜
+
+**问题**：AI 每换一个工程，都要重新解析 `.uvprojx` 才知道芯片/源文件/工具链；引脚和烧录端口
+还得靠扫源码反推。下一步要接 ESP32-S3-CAM，那边**根本没有 Keil 工程文件** —— 再写第二套解析器，
+工具接口就会分叉（「STM32 这样问、ESP32 那样问」），那才是真繁杂。
+
+**做法**：把「工程事实」抽成一份与工具链无关的 JSON，Keil 降级成「导入器 + 一个构建后端」。
+
+```
+<工程>/.dsh-mcu/project.json   芯片/内存 · 工具链 · 烧录端口 · 串口 · 引脚表 · 外设 · 源文件分布
+```
+
+| op | 行为 |
+| --- | --- |
+| （缺省）`read` | 读卡 + 校验；没卡时告诉你怎么生成 |
+| `import` | 从 `.uvprojx` 生成草案：器件 / 内存布局 / 工程文件 / OpenOCD target / 源文件目录 |
+| `init` | 按证据文件识别工具链：ESP-IDF（CMakeLists + sdkconfig/main）、PlatformIO（platformio.ini）、Keil |
+| `write` | 增量补丁：深合并、数组整体替换、`null` 删字段；日常只发改动部分 |
+| `validate` | 只校验不写；路径给 `.uvprojx` 且还没卡时，预览 import 会生成什么 |
+
+四条硬规矩：
+
+1. **导入不猜**。`.uvprojx` 里没有引脚和串口，导入就留空，由 `validate` 的 `missing` 报「该补什么」。
+   一张看起来完整、实际是编的卡，比没有卡更危险。
+2. **已有卡不覆盖**。`import`/`init` 遇到已有 `project.json` 直接拒绝 —— 那是人/模型确认过的事实，
+   不能被一次误调用冲掉；要改走 `write`。
+3. **引脚冲突算 error**：同一脚两个信号、保留脚（SWD）被占用、外设引用了不存在的脚，
+   都会明文列出来（`errors` 非空但写入仍成功 —— 文件写成功与内容自洽是两件事）。
+4. **`pins` 以卡为准**：卡里有引脚表就直接返回，并标明来源与 mtime；没有才回退到源码推导。
+   两条路径结论可能不同，模型必须能分辨「声明的事实」与「反推的结果」。
+
+`status` 已经带上卡摘要（芯片 · 工具链 · 引脚数 · 串口 · 待补项），所以新会话仍然只需要一次 status。
+`project` 也是**唯一不要求已打开 Keil 工程**的读接口：给 `path` 就能读任意工程目录的卡。
+
+回归：新增 `backend/scripts/test-projectcard.js`（模块级 40+ 断言，全在临时目录跑），
+`test-mcu-tool.js` 增加 `project` 全流程与「pins 以卡为准」断言，19 个 action 覆盖 18 个（flash 需显式 `--with-flash`）。
 
 ## 0.4.0：为 AI 省 token（2026-10-19/20）
 
